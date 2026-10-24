@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import type { AppScreen, GameSettings, GameState, PlayerStats, PracticeSettings, EasySettings, CharGameSettings, CharPracticeSettings } from '@/lib/types';
-import { loadStatsForPlayer, saveStats, createEmptyStats, getStickerCount, addSticker, syncRecordsFromServer } from '@/lib/storage';
+import { loadStatsForPlayer, saveStats, createEmptyStats, getStickerCount, addSticker, syncRecordsFromServer, loadLastName, saveLastName } from '@/lib/storage';
 import {
   createInitialGameState,
   drawNextNumber,
@@ -15,6 +16,7 @@ import { generateProblem } from '@/lib/math-problems';
 import { playCorrect, playWrong, playDraw, playBingo } from '@/lib/sounds';
 
 import HomeScreen from '@/components/screens/HomeScreen';
+import NameGateScreen from '@/components/screens/NameGateScreen';
 import SettingsScreen from '@/components/screens/SettingsScreen';
 import GameScreen from '@/components/screens/GameScreen';
 import ResultScreen from '@/components/screens/ResultScreen';
@@ -55,8 +57,16 @@ const FLOW_SCREENS: Record<FlowStart, AppScreen> = {
   char: 'char-settings',
 };
 
-export default function PlaygroundApp() {
-  const [screen, setScreen]       = useState<AppScreen>('home');
+interface Props {
+  /** /play/[game] から来たときの遊び。無ければホーム（/） */
+  gameId?: string;
+}
+
+export default function PlaygroundApp({ gameId }: Props) {
+  const router = useRouter();
+  // localStorage を読むまでは何も出さない（静的 HTML とのずれを避ける）
+  const [screen, setScreen]       = useState<AppScreen>('boot');
+  const [lastName, setLastName]   = useState('');
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
   const [playerName, setPlayerName] = useState('');
   const [stats, setStats]         = useState<PlayerStats | null>(null);
@@ -142,6 +152,22 @@ export default function PlaygroundApp() {
 
   // Clean up timer on unmount
   useEffect(() => () => clearAutoDraw(), []);
+
+  useEffect(() => {
+    const name = loadLastName();
+    const game = findGame(gameId ?? null);
+    if (!game) {
+      setLastName(name);
+      setScreen('home');
+    } else if (name) {
+      startGame(game, name);
+    } else {
+      setActiveGameId(game.id);
+      setScreen('name-gate');
+    }
+    // 起動時に1回だけ
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function handleStartGame() {
     clearAutoDraw();
@@ -256,12 +282,23 @@ export default function PlaygroundApp() {
 
   function handleBackToName() {
     clearAutoDraw();
+    if (gameId) {
+      router.push('/');
+      return;
+    }
     setScreen('home');
     setGameState(null);
     setActiveGameId(null);
   }
 
+  /** ホームで遊びを選んだら、その遊びの URL に移る */
   function handleSelectGame(game: GameEntry, name: string) {
+    saveLastName(name);
+    router.push(`/play/${game.id}`);
+  }
+
+  function startGame(game: GameEntry, name: string) {
+    saveLastName(name);
     if (name !== playerName) {
       setPlayerName(name);
       setStats(loadStatsForPlayer(name));
@@ -333,6 +370,7 @@ export default function PlaygroundApp() {
     <main className="max-w-lg mx-auto w-full h-full">
       {screen === 'home' && (
         <HomeScreen
+          initialName={lastName}
           onSelectGame={handleSelectGame}
           onRanking={() => setScreen('ranking')}
           stats={stats}
@@ -376,7 +414,7 @@ export default function PlaygroundApp() {
           settings={practiceSettings}
           onSettingsChange={setPracticeSettings}
           onStart={() => setScreen('practice')}
-          onBack={() => setScreen('home')}
+          onBack={handleBackToName}
         />
       )}
       {screen === 'practice' && (
@@ -392,7 +430,7 @@ export default function PlaygroundApp() {
           settings={easySettings}
           onSettingsChange={setEasySettings}
           onStart={() => setScreen('easy')}
-          onBack={() => setScreen('home')}
+          onBack={handleBackToName}
         />
       )}
       {screen === 'easy' && (
@@ -441,6 +479,13 @@ export default function PlaygroundApp() {
           onSessionComplete={(n) => handleSessionComplete(n, 'char-practice')}
         />
       )}
+      {screen === 'name-gate' && activeGame && (
+        <NameGateScreen
+          game={activeGame}
+          onStart={(name) => startGame(activeGame, name)}
+          onHome={handleBackToName}
+        />
+      )}
       {screen === 'play' && activeGame?.kind === 'standalone' && (
         <activeGame.Screen
           key={activeGame.id}
@@ -458,7 +503,7 @@ export default function PlaygroundApp() {
           stickerCount={sessionResult.stickerCount}
           mode={sessionResult.mode}
           onPlayAgain={() => setScreen(sessionResult.mode === 'easy' ? 'easy' : 'char-practice')}
-          onHome={() => { setSessionResult(null); setScreen('home'); }}
+          onHome={() => { setSessionResult(null); handleBackToName(); }}
         />
       )}
     </main>

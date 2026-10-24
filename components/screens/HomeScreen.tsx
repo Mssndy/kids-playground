@@ -6,6 +6,7 @@ import { winRate } from '@/lib/storage';
 import { GAMES, SHELVES, type GameEntry } from '@/components/games';
 
 interface Props {
+  initialName: string;
   onSelectGame: (game: GameEntry, name: string) => void;
   onRanking: () => void;
   stats: PlayerStats | null;
@@ -14,8 +15,8 @@ interface Props {
 
 const BOB_ANIMS = ['float-bob-1 4s', 'float-bob-2 4.2s', 'float-bob-3 3.8s'];
 
-export default function HomeScreen({ onSelectGame, onRanking, stats, stickerCount }: Props) {
-  const [name, setName] = useState(stats?.name ?? 'かず');
+export default function HomeScreen({ initialName, onSelectGame, onRanking, stats, stickerCount }: Props) {
+  const [name, setName] = useState(initialName);
 
   const trimmed = name.trim();
 
@@ -116,7 +117,7 @@ export default function HomeScreen({ onSelectGame, onRanking, stats, stickerCoun
             boxShadow: '0 3px 10px rgba(255,217,61,0.3)',
           }}
         >
-          🏆 ランキング
+          🏆 おうちランキング
         </button>
 
         {stickerCount > 0 && (

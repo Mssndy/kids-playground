@@ -1,7 +1,7 @@
 export interface LineSegment { r1: number; c1: number; r2: number; c2: number; }
 
 export type AppScreen =
-  | 'home' | 'settings' | 'game' | 'result'
+  | 'boot' | 'home' | 'name-gate' | 'settings' | 'game' | 'result'
   | 'practice-settings' | 'practice'
   | 'easy-settings' | 'easy'
   | 'char-settings' | 'char-game'
