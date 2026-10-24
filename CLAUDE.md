@@ -33,7 +33,13 @@
 1. `components/screens/` に `{ playerName, onHome }` を受け取る画面を作る
 2. `GAMES` に `kind: 'standalone'` で1件足す（`shelf` で棚を選ぶ）
 
-これでホームにカードが出て遊べる。設定画面などを `PlaygroundApp` 側で持つ遊び（ビンゴ・けいさん・もじ）だけが `kind: 'flow'`。
+これでホームにカードが出て、`/play/<id>` の URL・検索用メタデータ・共有カード画像・sitemap にも自動で載る（`about` に検索・共有用の紹介文を書く）。設定画面などを `PlaygroundApp` 側で持つ遊び（ビンゴ・けいさん・もじ）だけが `kind: 'flow'`。
+
+## 公開と子供のプライバシー
+外部の子供にも使ってもらう前提。名前は実名が入る想定で扱う。
+- ランキングは端末の中だけ（おうちランキング）。子供の名前を一覧で返す API は作らない
+- 広告は入れない（子供向けの広告規制があるため。入れるなら別途検討）
+- 公開 URL は https://asobi-no-hiroba.vercel.app（`lib/site.ts`）。アクセス計測は Vercel Analytics
 
 ## データ保存の注意
 localStorage のキー（`bingo_*`・`stickers_*` など）は旧名のまま残している。リネームすると記録が消えるので変えない。

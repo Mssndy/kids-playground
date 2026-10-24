@@ -139,3 +139,25 @@ export async function syncRecordsFromServer(playerName: string): Promise<void> {
     // サーバー取得失敗はサイレントに無視
   }
 }
+
+// ── さいごに使った名前 ─────────────────────────────────────────────────────────
+// 遊びごとの URL（/play/xxx）に直接来たとき、名前を聞き直さずに始めるため。
+
+const LAST_NAME_KEY = 'kp_last_name';
+
+export function loadLastName(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    return localStorage.getItem(LAST_NAME_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function saveLastName(name: string): void {
+  try {
+    localStorage.setItem(LAST_NAME_KEY, name);
+  } catch {
+    // 保存できなくても遊べる
+  }
+}

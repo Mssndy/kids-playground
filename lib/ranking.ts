@@ -1,9 +1,9 @@
 /**
  * Ranking / leaderboard storage.
  * All entries live in a single localStorage key (bingo_ranking_v1).
+ * 端末の中だけのランキング（家族用）。子供の名前を外に出さないため、サーバーには送らない。
  * Max 500 entries total; oldest/lowest are pruned to keep the list lean.
  */
-import { pushRankEntryToServer, fetchRankingsFromServer } from './api';
 
 export type RankGameMode =
   | 'toss'           // たまなげビンゴ — score (points)
@@ -66,31 +66,6 @@ export function saveRankEntry(entry: Omit<RankEntry, 'ts'>): void {
   // Keep top MAX_TOTAL entries by score (per mode) to bound storage size
   all.sort((a, b) => b.score - a.score);
   localStorage.setItem(RANK_KEY, JSON.stringify(all.slice(0, MAX_TOTAL)));
-
-  // fire-and-forget
-  pushRankEntryToServer(entry);
-}
-
-export async function refreshRankingsFromServer(
-  mode: RankGameMode,
-  period: RankPeriod,
-): Promise<void> {
-  try {
-    const serverEntries = await fetchRankingsFromServer(mode, period);
-    if (!serverEntries.length) return;
-
-    // localStorage のデータとマージ（重複をサーバーデータで置き換え）
-    const local = loadAllRankEntries().filter(
-      e => !(e.mode === mode && serverEntries.some(s => s.playerName === e.playerName && s.ts === e.ts))
-    );
-    const merged = [...local, ...serverEntries]
-      .sort((a, b) => b.score - a.score)
-      .slice(0, MAX_TOTAL);
-
-    localStorage.setItem(RANK_KEY, JSON.stringify(merged));
-  } catch {
-    // サーバー取得失敗はサイレントに無視
-  }
 }
 
 // ── Query ─────────────────────────────────────────────────────────────────────

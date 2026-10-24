@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getTopEntries, refreshRankingsFromServer, RANK_MODE_META } from '@/lib/ranking';
+import { getTopEntries, RANK_MODE_META } from '@/lib/ranking';
 import type { RankGameMode, RankPeriod, RankEntry } from '@/lib/ranking';
 
 interface Props {
@@ -38,8 +38,6 @@ export default function RankingScreen({ onHome }: Props) {
 
   useEffect(() => {
     setEntries(getTopEntries(mode, period));
-    refreshRankingsFromServer(mode, period)
-      .then(() => setEntries(getTopEntries(mode, period)));
   }, [mode, period]);
 
   const meta = RANK_MODE_META[mode];
@@ -57,7 +55,7 @@ export default function RankingScreen({ onHome }: Props) {
           🏠
         </button>
         <div className="text-center">
-          <h2 className="text-xl font-black text-gray-700">🏆 ランキング</h2>
+          <h2 className="text-xl font-black text-gray-700">🏆 おうちランキング</h2>
         </div>
         <div className="w-10" />
       </div>
