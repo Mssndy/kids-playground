@@ -137,7 +137,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
     }
   }
 
-  const operators: Operator[] = ['jr', 'metro', 'toei'];
+  const operators: Operator[] = ['jr', 'metro', 'toei', 'seibu'];
 
   return (
     <div className="flex flex-col items-center gap-4 py-5 animate-[fade-in_0.3s_ease_both]">
