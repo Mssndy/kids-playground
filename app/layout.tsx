@@ -9,8 +9,8 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "ビンゴ！",
-  description: "子供向けビンゴ抽選サービス。計算ビンゴにも対応！",
+  title: "あそびのひろば",
+  description: "子供向けのあそびのひろば。ビンゴ・けいさん・もじ・ミニゲームであそんでまなぼう！",
 };
 
 export default function RootLayout({

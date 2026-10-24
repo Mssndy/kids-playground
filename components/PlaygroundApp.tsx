@@ -14,7 +14,7 @@ import {
 import { generateProblem } from '@/lib/math-problems';
 import { playCorrect, playWrong, playDraw, playBingo } from '@/lib/sounds';
 
-import NameEntryScreen from '@/components/screens/NameEntryScreen';
+import HomeScreen from '@/components/screens/HomeScreen';
 import SettingsScreen from '@/components/screens/SettingsScreen';
 import GameScreen from '@/components/screens/GameScreen';
 import ResultScreen from '@/components/screens/ResultScreen';
@@ -26,18 +26,9 @@ import CharSettingsScreen from '@/components/screens/CharSettingsScreen';
 import CharGameScreen from '@/components/screens/CharGameScreen';
 import CharPracticeSettingsScreen from '@/components/screens/CharPracticeSettingsScreen';
 import CharPracticeGameScreen from '@/components/screens/CharPracticeGameScreen';
-import JankenGameScreen from '@/components/screens/JankenGameScreen';
-import TossGameScreen from '@/components/screens/TossGameScreen';
-import IqGameScreen from '@/components/screens/IqGameScreen';
-import SprintGameScreen from '@/components/screens/SprintGameScreen';
-import ShiritoriGameScreen from '@/components/screens/ShiritoriGameScreen';
-import MemoryGameScreen from '@/components/screens/MemoryGameScreen';
-import MoguraGameScreen from '@/components/screens/MoguraGameScreen';
-import RhythmGameScreen from '@/components/screens/RhythmGameScreen';
-import MiniGamePlazaScreen from '@/components/screens/MiniGamePlazaScreen';
 import RankingScreen from '@/components/screens/RankingScreen';
 import SessionCompleteScreen from '@/components/screens/SessionCompleteScreen';
-import SugorokuScreen from '@/components/screens/SugorokuScreen';
+import { findGame, type FlowStart, type GameEntry } from '@/components/games';
 import {
   generateCharBingoCard,
   createInitialCharGameState,
@@ -56,8 +47,17 @@ const DEFAULT_SETTINGS: GameSettings = {
   cardMode: 'web',
 };
 
-export default function BingoApp() {
-  const [screen, setScreen]       = useState<AppScreen>('name-entry');
+/** flow 型の遊びの入口画面 */
+const FLOW_SCREENS: Record<FlowStart, AppScreen> = {
+  bingo: 'settings',
+  practice: 'practice-settings',
+  easy: 'easy-settings',
+  char: 'char-settings',
+};
+
+export default function PlaygroundApp() {
+  const [screen, setScreen]       = useState<AppScreen>('home');
+  const [activeGameId, setActiveGameId] = useState<string | null>(null);
   const [playerName, setPlayerName] = useState('');
   const [stats, setStats]         = useState<PlayerStats | null>(null);
   const [settings, setSettings]   = useState<GameSettings>(DEFAULT_SETTINGS);
@@ -142,13 +142,6 @@ export default function BingoApp() {
 
   // Clean up timer on unmount
   useEffect(() => () => clearAutoDraw(), []);
-
-  function handleStart(name: string) {
-    setPlayerName(name);
-    setStats(loadStatsForPlayer(name));
-    syncRecordsFromServer(name).catch(() => {});
-    setScreen('settings');
-  }
 
   function handleStartGame() {
     clearAutoDraw();
@@ -263,26 +256,25 @@ export default function BingoApp() {
 
   function handleBackToName() {
     clearAutoDraw();
-    setScreen('name-entry');
+    setScreen('home');
     setGameState(null);
+    setActiveGameId(null);
   }
 
-  function handleGoToPractice(name: string) {
-    setPlayerName(name);
-    setStats(loadStatsForPlayer(name));
-    setScreen('practice-settings');
-  }
-
-  function handleGoToEasy(name: string) {
-    setPlayerName(name);
-    setStats(loadStatsForPlayer(name));
-    setScreen('easy-settings');
-  }
-
-  function handleGoToChar(name: string) {
-    setPlayerName(name);
-    setStats(loadStatsForPlayer(name));
-    setScreen('char-settings');
+  function handleSelectGame(game: GameEntry, name: string) {
+    if (name !== playerName) {
+      setPlayerName(name);
+      setStats(loadStatsForPlayer(name));
+      syncRecordsFromServer(name)
+        .then(() => setStickerCount(getStickerCount(name)))
+        .catch(() => {});
+    }
+    if (game.kind === 'flow') {
+      setScreen(FLOW_SCREENS[game.start]);
+    } else {
+      setActiveGameId(game.id);
+      setScreen('play');
+    }
   }
 
   function handleSessionComplete(correctCount: number, mode: 'easy' | 'char-practice') {
@@ -290,17 +282,6 @@ export default function BingoApp() {
     setStickerCount(newCount);
     setSessionResult({ correctCount, stickerCount: newCount, mode });
     setScreen('session-complete');
-  }
-
-  function handleGoToMiniGamePlaza(name: string) {
-    setPlayerName(name);
-    setScreen('minigame-plaza');
-  }
-
-  function handleGoToSugoroku(name: string) {
-    setPlayerName(name);
-    setStats(loadStatsForPlayer(name));
-    setScreen('sugoroku');
   }
 
   function handleStartCharGame() {
@@ -346,16 +327,13 @@ export default function BingoApp() {
     setScreen('result');
   }
 
+  const activeGame = findGame(activeGameId);
+
   return (
     <main className="max-w-lg mx-auto w-full h-full">
-      {screen === 'name-entry' && (
-        <NameEntryScreen
-          onStart={handleStart}
-          onPractice={handleGoToPractice}
-          onEasy={handleGoToEasy}
-          onChar={handleGoToChar}
-          onMiniGame={handleGoToMiniGamePlaza}
-          onSugoroku={handleGoToSugoroku}
+      {screen === 'home' && (
+        <HomeScreen
+          onSelectGame={handleSelectGame}
           onRanking={() => setScreen('ranking')}
           stats={stats}
           stickerCount={stickerCount}
@@ -398,7 +376,7 @@ export default function BingoApp() {
           settings={practiceSettings}
           onSettingsChange={setPracticeSettings}
           onStart={() => setScreen('practice')}
-          onBack={() => setScreen('name-entry')}
+          onBack={() => setScreen('home')}
         />
       )}
       {screen === 'practice' && (
@@ -414,7 +392,7 @@ export default function BingoApp() {
           settings={easySettings}
           onSettingsChange={setEasySettings}
           onStart={() => setScreen('easy')}
-          onBack={() => setScreen('name-entry')}
+          onBack={() => setScreen('home')}
         />
       )}
       {screen === 'easy' && (
@@ -463,76 +441,15 @@ export default function BingoApp() {
           onSessionComplete={(n) => handleSessionComplete(n, 'char-practice')}
         />
       )}
-      {screen === 'minigame-plaza' && (
-        <MiniGamePlazaScreen
+      {screen === 'play' && activeGame?.kind === 'standalone' && (
+        <activeGame.Screen
+          key={activeGame.id}
           playerName={playerName}
           onHome={handleBackToName}
-          onJanken={() => setScreen('janken')}
-          onToss={() => setScreen('toss')}
-          onIq={() => setScreen('iq')}
-          onSprint={() => setScreen('sprint')}
-          onShiritori={() => setScreen('shiritori')}
-          onMemory={() => setScreen('memory')}
-          onMogura={() => setScreen('mogura')}
-          onRhythm={() => setScreen('rhythm')}
-        />
-      )}
-      {screen === 'janken' && (
-        <JankenGameScreen
-          playerName={playerName}
-          onHome={() => setScreen('minigame-plaza')}
-        />
-      )}
-      {screen === 'toss' && (
-        <TossGameScreen
-          playerName={playerName}
-          onHome={() => setScreen('minigame-plaza')}
-        />
-      )}
-      {screen === 'iq' && (
-        <IqGameScreen
-          playerName={playerName}
-          onHome={() => setScreen('minigame-plaza')}
-        />
-      )}
-      {screen === 'sprint' && (
-        <SprintGameScreen
-          playerName={playerName}
-          onHome={() => setScreen('minigame-plaza')}
-        />
-      )}
-      {screen === 'shiritori' && (
-        <ShiritoriGameScreen
-          playerName={playerName}
-          onHome={() => setScreen('minigame-plaza')}
-        />
-      )}
-      {screen === 'memory' && (
-        <MemoryGameScreen
-          playerName={playerName}
-          onHome={() => setScreen('minigame-plaza')}
-        />
-      )}
-      {screen === 'mogura' && (
-        <MoguraGameScreen
-          playerName={playerName}
-          onHome={() => setScreen('minigame-plaza')}
-        />
-      )}
-      {screen === 'rhythm' && (
-        <RhythmGameScreen
-          playerName={playerName}
-          onHome={() => setScreen('minigame-plaza')}
         />
       )}
       {screen === 'ranking' && (
-        <RankingScreen onHome={() => setScreen('name-entry')} />
-      )}
-      {screen === 'sugoroku' && (
-        <SugorokuScreen
-          playerName={playerName}
-          onHome={handleBackToName}
-        />
+        <RankingScreen onHome={handleBackToName} />
       )}
       {screen === 'session-complete' && sessionResult && (
         <SessionCompleteScreen
@@ -541,7 +458,7 @@ export default function BingoApp() {
           stickerCount={sessionResult.stickerCount}
           mode={sessionResult.mode}
           onPlayAgain={() => setScreen(sessionResult.mode === 'easy' ? 'easy' : 'char-practice')}
-          onHome={() => { setSessionResult(null); setScreen('name-entry'); }}
+          onHome={() => { setSessionResult(null); setScreen('home'); }}
         />
       )}
     </main>

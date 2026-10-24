@@ -1,5 +1,5 @@
-import BingoApp from "@/components/BingoApp";
+import PlaygroundApp from "@/components/PlaygroundApp";
 
 export default function Home() {
-  return <BingoApp />;
+  return <PlaygroundApp />;
 }

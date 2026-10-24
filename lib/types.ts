@@ -1,16 +1,15 @@
 export interface LineSegment { r1: number; c1: number; r2: number; c2: number; }
 
 export type AppScreen =
-  | 'name-entry' | 'settings' | 'game' | 'result'
+  | 'home' | 'settings' | 'game' | 'result'
   | 'practice-settings' | 'practice'
   | 'easy-settings' | 'easy'
   | 'char-settings' | 'char-game'
   | 'char-practice-settings' | 'char-practice'
-  | 'minigame-plaza' | 'janken' | 'toss' | 'iq' | 'sprint' | 'shiritori'
-  | 'memory' | 'mogura' | 'rhythm'
+  /** components/games.ts に登録された standalone の遊び（activeGameId で選ぶ） */
+  | 'play'
   | 'ranking'
-  | 'session-complete'
-  | 'sugoroku';
+  | 'session-complete';
 
 // ── Character mode types ──────────────────────────────────────────────────────
 
