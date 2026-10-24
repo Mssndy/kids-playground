@@ -9,6 +9,7 @@ import MemoryGameScreen from '@/components/screens/MemoryGameScreen';
 import MoguraGameScreen from '@/components/screens/MoguraGameScreen';
 import RhythmGameScreen from '@/components/screens/RhythmGameScreen';
 import SugorokuScreen from '@/components/screens/SugorokuScreen';
+import StationQuizScreen from '@/components/screens/StationQuizScreen';
 
 /**
  * ひろばに並ぶ遊びの一覧（ここが唯一の登録場所）。
@@ -87,6 +88,13 @@ export const GAMES: GameEntry[] = [
     emoji: '🦒', label: 'しりとり', desc: 'ことばを\nつなげよう！',
     gradient: 'linear-gradient(135deg, #38d9a9 0%, #1098ad 100%)',
     border: 'rgba(16,152,173,0.6)',
+  },
+
+  {
+    id: 'station', kind: 'standalone', Screen: StationQuizScreen, shelf: 'learn',
+    emoji: '🚃', label: 'えきめいクイズ', desc: 'えきの ばんごうで\nなにえき？',
+    gradient: 'linear-gradient(135deg, #20c997 0%, #1c7ed6 100%)',
+    border: 'rgba(28,126,214,0.6)',
   },
 
   // ── あそぶ ────────────────────────────────────────────────────────────────
