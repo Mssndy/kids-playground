@@ -24,6 +24,8 @@ export const metadata: Metadata = {
     url: "/",
   },
   twitter: { card: "summary_large_image" },
+  // Google Search Console の所有権確認（URL プレフィックス / HTML タグ）
+  verification: { google: "ZlnrdkYOIcnSGZN19TtRIpbA1v4vX_LYalBUPc2DdA0" },
 };
 
 export default function RootLayout({
