@@ -14,26 +14,35 @@ interface Props {
 }
 
 type Phase = 'select' | 'quiz' | 'done';
+type Level = 'normal' | 'hard';
+
+const LEVELS: Record<Level, { label: string; choices: number }> = {
+  normal: { label: 'ふつう', choices: 4 },
+  hard:   { label: 'むずかしい', choices: 10 },
+};
 
 const QUESTION_COUNT = 10;
 const ALL_ID = 'all';
 const THEME = 'linear-gradient(135deg, #20c997 0%, #1c7ed6 100%)';
 
-function bestKey(playerName: string, lineId: string) {
-  return `station_best_${lineId}_${playerName}`;
+function bestKey(playerName: string, lineId: string, level: Level) {
+  // ふつうは以前からのキーのまま（記録を消さない）
+  return level === 'normal'
+    ? `station_best_${lineId}_${playerName}`
+    : `station_best_${level}_${lineId}_${playerName}`;
 }
 
-function loadBest(playerName: string, lineId: string): number {
+function loadBest(playerName: string, lineId: string, level: Level): number {
   try {
-    return parseInt(localStorage.getItem(bestKey(playerName, lineId)) ?? '0', 10);
+    return parseInt(localStorage.getItem(bestKey(playerName, lineId, level)) ?? '0', 10);
   } catch {
     return 0;
   }
 }
 
-function saveBest(playerName: string, lineId: string, score: number) {
+function saveBest(playerName: string, lineId: string, level: Level, score: number) {
   try {
-    localStorage.setItem(bestKey(playerName, lineId), String(score));
+    localStorage.setItem(bestKey(playerName, lineId, level), String(score));
   } catch {
     // 保存できなくても遊べる
   }
@@ -62,11 +71,13 @@ function StationBadge({ line, number, size = 'lg' }: { line: Line; number: numbe
   );
 }
 
-function StationName({ station, big = false }: { station: Station; big?: boolean }) {
+function StationName({ station, size = 'md' }: { station: Station; size?: 'sm' | 'md' | 'lg' }) {
+  const text = { sm: 'text-sm', md: 'text-lg', lg: 'text-3xl' }[size];
+  const rt = { sm: 'text-[9px]', md: 'text-[10px]', lg: 'text-xs' }[size];
   return (
-    <ruby className={`${big ? 'text-3xl' : 'text-lg'} font-black leading-tight`}>
+    <ruby className={`${text} font-black leading-tight`}>
       {station.name}
-      <rt className={`${big ? 'text-xs' : 'text-[10px]'} font-bold opacity-70`}>{station.kana}</rt>
+      <rt className={`${rt} font-bold opacity-70`}>{station.kana}</rt>
     </ruby>
   );
 }
@@ -74,6 +85,7 @@ function StationName({ station, big = false }: { station: Station; big?: boolean
 export default function StationQuizScreen({ playerName, onHome }: Props) {
   const [phase, setPhase]         = useState<Phase>('select');
   const [lineId, setLineId]       = useState<string>(ALL_ID);
+  const [level, setLevel]         = useState<Level>('normal');
   const [questions, setQuestions] = useState<StationQuestion[]>([]);
   const [qIndex, setQIndex]       = useState(0);
   const [picked, setPicked]       = useState<string | null>(null);
@@ -92,7 +104,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
   function start(id: string) {
     const lines = id === ALL_ID ? LINES : LINES.filter((l) => l.id === id);
     setLineId(id);
-    setQuestions(buildQuestions(lines, QUESTION_COUNT));
+    setQuestions(buildQuestions(lines, QUESTION_COUNT, LEVELS[level].choices));
     setQIndex(0);
     setPicked(null);
     setShowHint(false);
@@ -102,9 +114,9 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
   }
 
   function finish(finalScore: number) {
-    const prevBest = loadBest(playerName, lineId);
+    const prevBest = loadBest(playerName, lineId, level);
     const newBest = finalScore > prevBest;
-    if (newBest) saveBest(playerName, lineId, finalScore);
+    if (newBest) saveBest(playerName, lineId, level, finalScore);
     setBest(Math.max(prevBest, finalScore));
     setIsBest(newBest);
     if (newBest) playNewBest(); else playGoalReached();
@@ -161,6 +173,23 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
       {/* ── SELECT ── */}
       {phase === 'select' && (
         <div className="flex flex-col items-center gap-4 w-full max-w-sm px-4 animate-[fade-in_0.25s_ease_both]">
+          <div className="w-full grid grid-cols-2 gap-2 p-1 rounded-2xl bg-white shadow-inner" role="radiogroup" aria-label="むずかしさ">
+            {(Object.keys(LEVELS) as Level[]).map((lv) => (
+              <button
+                key={lv}
+                role="radio"
+                aria-checked={level === lv}
+                onClick={() => setLevel(lv)}
+                className="py-2 rounded-xl text-sm font-black transition-all active:scale-95"
+                style={level === lv
+                  ? { background: THEME, color: 'white' }
+                  : { background: 'transparent', color: '#868e96' }}
+              >
+                {lv === 'hard' ? '🔥 ' : '🙂 '}{LEVELS[lv].label}（{LEVELS[lv].choices}たく）
+              </button>
+            ))}
+          </div>
+
           <button
             onClick={() => start(ALL_ID)}
             className="w-full rounded-3xl px-6 py-5 text-center shadow-lg active:scale-95 transition-all"
@@ -202,7 +231,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
         <div key={qIndex} className="flex flex-col items-center gap-4 w-full max-w-sm px-4 animate-[fade-in_0.25s_ease_both]">
           {/* Progress */}
           <div className="w-full flex items-center justify-between text-sm font-black text-gray-500">
-            <span>{qIndex + 1} / {questions.length} もんめ</span>
+            <span>{qIndex + 1} / {questions.length} もんめ{level === 'hard' && ' 🔥'}</span>
             <span>⭕ {score}</span>
           </div>
 
@@ -243,7 +272,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
           </div>
 
           {/* Choices */}
-          <div className="grid grid-cols-2 gap-3 w-full">
+          <div className={`grid grid-cols-2 w-full ${level === 'hard' ? 'gap-2' : 'gap-3'}`}>
             {q.choices.map((st) => {
               const isAnswer = st.name === q.answer.name;
               const isPicked = st.name === picked;
@@ -260,7 +289,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
                   key={st.name}
                   onClick={() => pick(st)}
                   disabled={answered}
-                  className="rounded-2xl px-2 py-4 shadow-md active:scale-95 transition-all"
+                  className={`rounded-2xl px-2 shadow-md active:scale-95 transition-all ${level === 'hard' ? 'py-1.5' : 'py-4'}`}
                   style={{
                     background: bg,
                     color,
@@ -269,7 +298,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
                     animation: answered && isAnswer ? 'bounce-in 0.4s cubic-bezier(0.34,1.56,0.64,1) both' : undefined,
                   }}
                 >
-                  <StationName station={st} />
+                  <StationName station={st} size={level === 'hard' ? 'sm' : 'md'} />
                 </button>
               );
             })}
@@ -284,7 +313,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
                 <>
                   <p className="text-lg font-black text-gray-600 text-center">
                     おしい！ {stationCode(q.line, q.answer.number)} は<br />
-                    <span style={{ color: '#1c7ed6' }}><StationName station={q.answer} big /></span> だよ
+                    <span style={{ color: '#1c7ed6' }}><StationName station={q.answer} size="lg" /></span> だよ
                   </p>
                   <button
                     onClick={() => goNext(score)}
@@ -316,7 +345,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
               <span className="text-base font-black text-white/80">/ {questions.length}</span>
             </div>
             <p className="text-xs font-bold text-white/80 mt-2">
-              {lineId === ALL_ID ? 'ぜんぶの せんろ' : LINES.find((l) => l.id === lineId)?.name} の さいこう：{best}もん
+              {lineId === ALL_ID ? 'ぜんぶの せんろ' : LINES.find((l) => l.id === lineId)?.name}（{LEVELS[level].label}）の さいこう：{best}もん
             </p>
           </div>
           <button
