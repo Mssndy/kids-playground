@@ -100,8 +100,8 @@ export const GAMES: GameEntry[] = [
 
   {
     id: 'station', kind: 'standalone', Screen: StationQuizScreen, shelf: 'learn',
-    emoji: '🚃', label: 'えきめいクイズ', desc: 'えきの ばんごうで\nなにえき？',
-    about: '駅ナンバリング（山手線 JY01 など）と路線の色から駅名を当てるクイズ。山手線・東京メトロ・都営地下鉄・西武池袋線に対応。',
+    emoji: '🚃', label: 'えきめいクイズ', desc: 'えきの ばんごうや\nろせんずで なにえき？',
+    about: '駅ナンバリング（山手線 JY01 など）や、地図の上の路線図の位置から駅名を当てるクイズ。山手線・東京メトロ・都営地下鉄・西武池袋線に対応。',
     gradient: 'linear-gradient(135deg, #20c997 0%, #1c7ed6 100%)',
     border: 'rgba(28,126,214,0.6)',
   },

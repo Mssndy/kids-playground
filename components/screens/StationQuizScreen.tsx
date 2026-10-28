@@ -94,16 +94,19 @@ function MapLabel({ x, y, anchor, station }: { x: number; y: number; anchor: 'st
   );
 }
 
-/** 「？」の駅。ぴょこぴょこ光らせて目立たせる。 */
-function MapTarget({ x, y, color }: { x: number; y: number; color: string }) {
+/** 「？」の駅。黄色と黒で目立たせ、光の輪と上の矢印をぴょこぴょこ動かす。 */
+function MapTarget({ x, y }: { x: number; y: number }) {
   return (
     <g>
-      <circle cx={x} cy={y} r={11} fill={color} opacity={0.35}>
-        <animate attributeName="r" values="11;17;11" dur="1.6s" repeatCount="indefinite" />
-        <animate attributeName="opacity" values="0.35;0;0.35" dur="1.6s" repeatCount="indefinite" />
+      <circle cx={x} cy={y} r={14} fill="#ffd43b" opacity={0.7}>
+        <animate attributeName="r" values="14;30;14" dur="1.4s" repeatCount="indefinite" />
+        <animate attributeName="opacity" values="0.7;0;0.7" dur="1.4s" repeatCount="indefinite" />
       </circle>
-      <circle cx={x} cy={y} r={11} fill="white" stroke={color} strokeWidth={4} />
-      <text x={x} y={y + 5} textAnchor="middle" fontSize={14} fontWeight={900} className="fill-gray-800">？</text>
+      <circle cx={x} cy={y} r={14} fill="#ffd43b" stroke="#212529" strokeWidth={3} />
+      <text x={x} y={y + 6} textAnchor="middle" fontSize={18} fontWeight={900} fill="#212529">？</text>
+      <path d={`M${x - 7},${y - 30} L${x + 7},${y - 30} L${x},${y - 20} Z`} fill="#212529">
+        <animateTransform attributeName="transform" type="translate" values="0,0;0,-5;0,0" dur="0.8s" repeatCount="indefinite" />
+      </path>
     </g>
   );
 }
@@ -132,13 +135,47 @@ const isSea = (pt: [number, number]) => inside(pt, SEA) && !ISLANDS.some((isl) =
 /** 地図の目印にする大きな駅。出題の路線の両端のつぎに名前を出す。 */
 const HUBS = ['東京', '新宿', '渋谷', '池袋', '上野', '品川'];
 
+type Pt = { x: number; y: number };
+type Box = { x0: number; x1: number; y0: number; y1: number };
+type Anchor = 'start' | 'middle' | 'end';
+type Placed = { st: Station; p: Pt; anchor: Anchor; x: number; y: number; box: Box };
+
+const overlap = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+
+const POSITIONS = ['below', 'above', 'right', 'left'] as const;
+
+/**
+ * 駅名ラベルを点 p のまわりの pos に置いたときの位置と、文字が占める四角。
+ * gap で点から離す（「？」の駅は印が大きいので離す）。上下に置くときは、地図の端からはみ出さないよう左右に寄せる。
+ */
+function placeLabel(st: Station, p: Pt, pos: (typeof POSITIONS)[number], width: number, gap = 0): Placed {
+  const w = Math.max(st.name.length * 12, st.kana.length * 8);
+  let { anchor, x } = {
+    below: { anchor: 'middle' as Anchor, x: p.x },
+    above: { anchor: 'middle' as Anchor, x: p.x },
+    right: { anchor: 'start' as Anchor, x: p.x + 10 + gap },
+    left:  { anchor: 'end' as Anchor, x: p.x - 10 - gap },
+  }[pos];
+  const y = { below: p.y + 18 + gap, above: p.y - 20 - gap, right: p.y + 2, left: p.y + 2 }[pos];
+  if (anchor === 'middle' && p.x - w / 2 < 2) { anchor = 'start'; x = p.x - 4; }
+  if (anchor === 'middle' && p.x + w / 2 > width - 2) { anchor = 'end'; x = p.x + 4; }
+  const x0 = anchor === 'start' ? x : anchor === 'end' ? x - w : x - w / 2;
+  return { st, p, anchor, x, y, box: { x0, x1: x0 + w, y0: y - 11, y1: y + 13 } };
+}
+
+const MIN_ZOOM = 0.6;
+const MAX_ZOOM = 6;
+const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+
 /**
  * ろせんず。実際の駅の位置で路線の形を描き、出題の駅だけ「？」にする。
  * まわりのほかの路線もうすく描いて地図にする（上が北）。
  * 名前を出すのは出題の路線の両端と大きな駅だけで、出題の駅の名前は出さない。
+ * hint のときは となりの駅、reveal（答えたあと）のときは出題の駅の名前を札で出す。
+ * ボタン・ドラッグ・ピンチ・ホイールで動かせる。線や文字の大きさは変えず、駅の間だけ広がる。
  */
-function RouteMap({ line, index }: { line: Line; index: number }) {
-  const W = 300, PAD = 30, MAX_H = 260, MIN_H = 150;
+function RouteMap({ line, index, hint, reveal }: { line: Line; index: number; hint: boolean; reveal: boolean }) {
+  const W = 300, PAD = 30, MAX_H = 360, MIN_H = 240;
   const coords = STATION_COORDS[line.id];
   const lats = coords.map(([la]) => la);
   const lons = coords.map(([, lo]) => lo);
@@ -147,90 +184,217 @@ function RouteMap({ line, index }: { line: Line; index: number }) {
   const dx = Math.max((Math.max(...lons) - Math.min(...lons)) * kx, 0.01);
   const dy = Math.max(Math.max(...lats) - Math.min(...lats), 0.01);
   const scale = Math.min((W - PAD * 2) / dx, (MAX_H - PAD * 2) / dy);
-  const H = Math.max(MIN_H, dy * scale + PAD * 2);
-  const cLon = (Math.min(...lons) + Math.max(...lons)) / 2;
-  const cLat = (Math.min(...lats) + Math.max(...lats)) / 2;
-  const proj = ([la, lo]: [number, number]) => ({
-    x: W / 2 + (lo - cLon) * kx * scale,
-    y: H / 2 - (la - cLat) * scale,
+  const H = Math.round(Math.max(MIN_H, dy * scale + PAD * 2));
+  const home = { zoom: 1, lat: lat0, lon: (Math.min(...lons) + Math.max(...lons)) / 2 };
+
+  const [view, setView] = useState(home);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const pointers = useRef(new Map<number, Pt>());
+
+  const toLocal = (clientX: number, clientY: number): Pt => {
+    const r = svgRef.current!.getBoundingClientRect();
+    return { x: ((clientX - r.left) * W) / r.width, y: ((clientY - r.top) * H) / r.height };
+  };
+  const panBy = (v: typeof view, mx: number, my: number) =>
+    ({ ...v, lon: v.lon - mx / (kx * scale * v.zoom), lat: v.lat + my / (scale * v.zoom) });
+  // 点 at の下の場所が動かないように拡大・縮小する
+  const zoomAt = (v: typeof view, factor: number, at: Pt) => {
+    const zoom = clampZoom(v.zoom * factor);
+    const s0 = scale * v.zoom, s1 = scale * zoom;
+    return {
+      zoom,
+      lon: v.lon + (at.x - W / 2) / (kx * s0) - (at.x - W / 2) / (kx * s1),
+      lat: v.lat - (at.y - H / 2) / s0 + (at.y - H / 2) / s1,
+    };
+  };
+  // ボタンは「？」を中心に拡大・縮小する（「？」が地図の外にあるときは地図のまんなか）
+  const zoomButton = (factor: number) => setView((v) => {
+    const [la, lo] = coords[index];
+    const t = { x: W / 2 + (lo - v.lon) * kx * scale * v.zoom, y: H / 2 - (la - v.lat) * scale * v.zoom };
+    const at = t.x > 0 && t.x < W && t.y > 0 && t.y < H ? t : { x: W / 2, y: H / 2 };
+    return zoomAt(v, factor, at);
+  });
+
+  // ホイールはページのスクロールを止めたいので passive: false で付ける
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      const at = { x: ((e.clientX - r.left) * W) / r.width, y: ((e.clientY - r.top) * H) / r.height };
+      const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+      setView((v) => {
+        const zoom = clampZoom(v.zoom * factor);
+        const s0 = scale * v.zoom, s1 = scale * zoom;
+        return {
+          zoom,
+          lon: v.lon + (at.x - W / 2) / (kx * s0) - (at.x - W / 2) / (kx * s1),
+          lat: v.lat - (at.y - H / 2) / s0 + (at.y - H / 2) / s1,
+        };
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [H, kx, scale]);
+
+  function onPointerDown(e: React.PointerEvent<SVGSVGElement>) {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    pointers.current.set(e.pointerId, toLocal(e.clientX, e.clientY));
+  }
+  function onPointerMove(e: React.PointerEvent<SVGSVGElement>) {
+    const ps = pointers.current;
+    if (!ps.has(e.pointerId)) return;
+    const before = [...ps.values()];
+    ps.set(e.pointerId, toLocal(e.clientX, e.clientY));
+    const after = [...ps.values()];
+    if (after.length === 1) {
+      setView((v) => panBy(v, after[0].x - before[0].x, after[0].y - before[0].y));
+    } else if (after.length === 2) {
+      // ピンチ：2本の指のまんなかを動かしつつ、指の間の広がりぶん拡大する
+      const mid = (a: Pt, b: Pt) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+      const gap = (a: Pt, b: Pt) => Math.max(Math.hypot(a.x - b.x, a.y - b.y), 1);
+      const m0 = mid(before[0], before[1]), m1 = mid(after[0], after[1]);
+      const factor = gap(after[0], after[1]) / gap(before[0], before[1]);
+      setView((v) => zoomAt(panBy(v, m1.x - m0.x, m1.y - m0.y), factor, m1));
+    }
+  }
+  function onPointerUp(e: React.PointerEvent<SVGSVGElement>) {
+    pointers.current.delete(e.pointerId);
+  }
+
+  const s = scale * view.zoom;
+  const proj = ([la, lo]: [number, number]): Pt => ({
+    x: W / 2 + (lo - view.lon) * kx * s,
+    y: H / 2 - (la - view.lat) * s,
   });
   const pathOf = (coordList: [number, number][], closed = false) =>
     coordList.map(proj).map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('') + (closed ? 'Z' : '');
   const linePath = (l: Line) => pathOf(STATION_COORDS[l.id], l.loop);
+  const inFrame = (p: Pt, m = 4) => p.x > m && p.x < W - m && p.y > m && p.y < H - m;
   const bay = BAY_LABELS.filter(isSea).map(proj).find((p) => p.x > 40 && p.x < W - 40 && p.y > 20 && p.y < H - 8);
 
   const pts = coords.map(proj);
+  const n = coords.length;
   const target = pts[index];
-  const answerName = line.stations[index].split('|')[0];
+  const answer = stationAt(line, index);
+  // 「？」と上の矢印、右下の ＋－↺ ボタンのところには名前を置かない
+  const taken: Box[] = [
+    { x0: target.x - 18, x1: target.x + 18, y0: target.y - 34, y1: target.y + 18 },
+    { x0: W - 44, x1: W, y0: H - 128, y1: H },
+  ];
+  const fits = (pl: Placed) => inFrame({ x: pl.box.x0, y: pl.box.y0 }, 0) && inFrame({ x: pl.box.x1, y: pl.box.y1 }, 0)
+    && !taken.some((b) => overlap(b, pl.box));
+  // 札：答えたあとの答え → ヒントのとなりの駅（山手線は輪なので両はしもとなり）
+  const tags: (Placed & { kind: 'answer' | 'hint' })[] = [];
+  if (reveal) {
+    // 答えの札は「？」の印に重ねてよいので、地図に入るかだけ見る
+    const pl = POSITIONS.map((pos) => placeLabel(answer, target, pos, W, 10))
+      .find((pl) => inFrame({ x: pl.box.x0, y: pl.box.y0 }, 0) && inFrame({ x: pl.box.x1, y: pl.box.y1 }, 0));
+    if (pl) { tags.push({ ...pl, kind: 'answer' }); taken.push(pl.box); }
+  }
+  if (hint || reveal) {
+    const near = [index - 1, index + 1]
+      .map((i) => (line.loop ? (i + n) % n : i))
+      .filter((i) => i >= 0 && i < n);
+    for (const i of near) {
+      // 駅が混んでいて近くに置けないときは、少しずつ離して置き、線で駅と結ぶ
+      const pl = [0, 16, 32, 48].flatMap((gap) => POSITIONS.map((pos) => placeLabel(stationAt(line, i), pts[i], pos, W, gap))).find(fits);
+      if (pl) { tags.push({ ...pl, kind: 'hint' }); taken.push(pl.box); }
+    }
+  }
 
   // 名前を出す駅：両端 → 大きな駅（ほかの路線のものも、地図に入っていれば）。重なるものは出さない
-  const n = coords.length;
-  const candidates: { st: Station; p: { x: number; y: number } }[] = [];
+  const candidates: { st: Station; p: Pt }[] = [];
   for (const i of line.loop ? [] : [0, n - 1]) candidates.push({ st: stationAt(line, i), p: pts[i] });
   for (const hub of HUBS) {
     for (const l of LINES) {
-      const i = l.stations.findIndex((s) => s.startsWith(`${hub}|`));
+      const i = l.stations.findIndex((st) => st.startsWith(`${hub}|`));
       if (i < 0) continue;
       candidates.push({ st: stationAt(l, i), p: proj(STATION_COORDS[l.id][i]) });
       break;
     }
   }
-  // ラベルの置き場所と、文字が占める四角。下にはみ出すときは点の上に出す
-  const place = ({ st, p }: (typeof candidates)[number]) => {
-    const anchor: 'start' | 'middle' | 'end' = p.x < 60 ? 'start' : p.x > W - 60 ? 'end' : 'middle';
-    const y = p.y + 22 > H - 4 ? p.y - 18 : p.y + 16;
-    const w = Math.max(st.name.length * 12, st.kana.length * 8);
-    const x0 = anchor === 'start' ? p.x : anchor === 'end' ? p.x - w : p.x - w / 2;
-    return { anchor, y, box: { x0, x1: x0 + w, y0: y - 11, y1: y + 13 } };
-  };
-  type Box = { x0: number; x1: number; y0: number; y1: number };
-  const hit = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
-  const targetBox = { x0: target.x - 16, x1: target.x + 16, y0: target.y - 16, y1: target.y + 16 };
-  const labels: ((typeof candidates)[number] & ReturnType<typeof place>)[] = [];
-  for (const c of candidates) {
-    const { x, y } = c.p;
-    if (c.st.name === answerName || labels.some((l) => l.st.name === c.st.name)) continue;
-    if (x < 4 || x > W - 4 || y < 4 || y > H - 4) continue;
-    const pl = place(c);
-    if (hit(pl.box, targetBox) || labels.some((l) => hit(l.box, pl.box))) continue;
-    labels.push({ ...c, ...pl });
+  const labels: Placed[] = [];
+  for (const { st, p } of candidates) {
+    if (st.name === answer.name || !inFrame(p)) continue;
+    if (labels.some((l) => l.st.name === st.name) || tags.some((t) => t.st.name === st.name)) continue;
+    const pl = (['below', 'above'] as const).map((pos) => placeLabel(st, p, pos, W)).find(fits);
+    if (pl) { labels.push(pl); taken.push(pl.box); }
   }
 
+  const btn = 'w-10 h-10 rounded-full bg-white/90 shadow-md text-xl font-black text-gray-600 active:scale-90 transition-all flex items-center justify-center';
   return (
-    <svg viewBox={`0 0 ${W} ${H.toFixed(0)}`} className="w-full rounded-2xl" style={{ background: LAND }} role="img" aria-label={`${line.name}の ろせんず`}>
-      {/* 地形：海 → 島 → 皇居 → 川 */}
-      <path d={pathOf(SEA, true)} fill={WATER} />
-      {ISLANDS.map((isl, i) => <path key={i} d={pathOf(isl, true)} fill={LAND} />)}
-      <path d={pathOf(PALACE, true)} fill={PARK} />
-      {Object.entries(RIVERS).flatMap(([name, parts]) => parts.map((part, i) => (
-        <path
-          key={`${name}${i}`} d={pathOf(part)} fill="none" stroke={WATER}
-          strokeWidth={BIG_RIVERS.includes(name) ? 4 : 2.5} strokeLinejoin="round" strokeLinecap="round"
-        />
-      )))}
-      {bay && (
-        <text x={bay.x} y={bay.y} textAnchor="middle" fontSize={10} fontWeight={900} fill="#74a9d8" letterSpacing={2}>
-          とうきょうわん
-        </text>
-      )}
-      {LINES.filter((l) => l.id !== line.id).map((l) => (
-        <path key={l.id} d={linePath(l)} fill="none" stroke={l.color} strokeOpacity={0.25} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" />
-      ))}
-      <path d={linePath(line)} fill="none" stroke={line.color} strokeWidth={6} strokeLinejoin="round" strokeLinecap="round" />
-      {pts.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r={3.5} fill="white" stroke={line.color} strokeWidth={2} />
-      ))}
-      {labels.map(({ st, p, anchor, y }) => (
-        <g key={st.name}>
-          <circle cx={p.x} cy={p.y} r={2.5} fill="#495057" />
-          <MapLabel x={p.x} y={y} anchor={anchor} station={st} />
-        </g>
-      ))}
-      <text x={W - 8} y={16} textAnchor="end" fontSize={10} fontWeight={900} className="fill-gray-400">↑きた</text>
-      {/* 地形のデータの出典（OpenStreetMap の利用条件で表示が必要） */}
-      <text x={W - 4} y={H - 4} textAnchor="end" fontSize={6} className="fill-gray-400">© OpenStreetMap contributors</text>
-      <MapTarget x={target.x} y={target.y} color={line.color} />
-    </svg>
+    <div className="relative w-full">
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full rounded-2xl select-none cursor-grab active:cursor-grabbing"
+        style={{ background: LAND, touchAction: 'none' }}
+        role="img"
+        aria-label={`${line.name}の ろせんず`}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
+        {/* 地形：海 → 島 → 皇居 → 川 */}
+        <path d={pathOf(SEA, true)} fill={WATER} />
+        {ISLANDS.map((isl, i) => <path key={i} d={pathOf(isl, true)} fill={LAND} />)}
+        <path d={pathOf(PALACE, true)} fill={PARK} />
+        {Object.entries(RIVERS).flatMap(([name, parts]) => parts.map((part, i) => (
+          <path
+            key={`${name}${i}`} d={pathOf(part)} fill="none" stroke={WATER}
+            strokeWidth={BIG_RIVERS.includes(name) ? 4 : 2.5} strokeLinejoin="round" strokeLinecap="round"
+          />
+        )))}
+        {bay && (
+          <text x={bay.x} y={bay.y} textAnchor="middle" fontSize={10} fontWeight={900} fill="#74a9d8" letterSpacing={2}>
+            とうきょうわん
+          </text>
+        )}
+        {LINES.filter((l) => l.id !== line.id).map((l) => (
+          <path key={l.id} d={linePath(l)} fill="none" stroke={l.color} strokeOpacity={0.25} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" />
+        ))}
+        <path d={linePath(line)} fill="none" stroke={line.color} strokeWidth={6} strokeLinejoin="round" strokeLinecap="round" />
+        {pts.map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r={3.5} fill="white" stroke={line.color} strokeWidth={2} />
+        ))}
+        {labels.map(({ st, p, anchor, x, y }) => (
+          <g key={st.name}>
+            <circle cx={p.x} cy={p.y} r={2.5} fill="#495057" />
+            <MapLabel x={x} y={y} anchor={anchor} station={st} />
+          </g>
+        ))}
+        {/* ヒントの札と駅を結ぶ線は「？」の下に描く（「？」を隠さない） */}
+        {tags.filter((t) => t.kind === 'hint').map(({ st, p, box }) => (
+          <g key={st.name}>
+            <line x1={p.x} y1={p.y} x2={(box.x0 + box.x1) / 2} y2={(box.y0 + box.y1) / 2} stroke={line.color} strokeWidth={2} />
+            <circle cx={p.x} cy={p.y} r={4} fill={line.color} />
+          </g>
+        ))}
+        <MapTarget x={target.x} y={target.y} />
+        {tags.map(({ st, anchor, x, y, box, kind }) => (
+          <g key={st.name} style={{ animation: 'bounce-in 0.35s cubic-bezier(0.34,1.56,0.64,1) both', transformBox: 'fill-box', transformOrigin: 'center' }}>
+            <rect
+              x={box.x0 - 4} y={box.y0 - 2} width={box.x1 - box.x0 + 8} height={box.y1 - box.y0 + 4} rx={6}
+              fill={kind === 'answer' ? '#fff3bf' : 'white'} stroke={kind === 'answer' ? '#f59f00' : line.color} strokeWidth={2}
+            />
+            <MapLabel x={x} y={y} anchor={anchor} station={st} />
+          </g>
+        ))}
+        <text x={W - 8} y={16} textAnchor="end" fontSize={10} fontWeight={900} className="fill-gray-400">↑きた</text>
+        {/* 地形のデータの出典（OpenStreetMap の利用条件で表示が必要） */}
+        <text x={4} y={H - 4} fontSize={6} className="fill-gray-400">© OpenStreetMap contributors</text>
+      </svg>
+      <div className="absolute right-2 bottom-2 flex flex-col gap-1.5">
+        <button className={btn} onClick={() => zoomButton(1.5)} aria-label="おおきく する">＋</button>
+        <button className={btn} onClick={() => zoomButton(1 / 1.5)} aria-label="ちいさく する">－</button>
+        {(view.zoom !== 1 || view.lat !== home.lat || view.lon !== home.lon) && (
+          <button className={`${btn} text-base`} onClick={() => setView(home)} aria-label="もとに もどす">↺</button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -411,7 +575,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
 
       {/* ── QUIZ ── */}
       {phase === 'quiz' && q && (
-        <div key={qIndex} className="flex flex-col items-center gap-4 w-full max-w-sm px-4 animate-[fade-in_0.25s_ease_both]">
+        <div key={qIndex} className={`flex flex-col items-center gap-4 w-full ${mode === 'map' ? 'max-w-md' : 'max-w-sm'} px-4 animate-[fade-in_0.25s_ease_both]`}>
           {/* Progress */}
           <div className="w-full flex items-center justify-between text-sm font-black text-gray-500">
             <span>{qIndex + 1} / {questions.length} もんめ{mode === 'map' && ' 🗺️'}{level === 'hard' && ' 🔥'}</span>
@@ -420,7 +584,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
 
           {/* Question */}
           <div
-            className="w-full rounded-3xl bg-white px-4 py-5 flex flex-col items-center gap-3 shadow-lg"
+            className={`w-full rounded-3xl bg-white ${mode === 'map' ? 'px-2' : 'px-4'} py-5 flex flex-col items-center gap-3 shadow-lg`}
             style={{ border: `4px solid ${q.line.color}` }}
           >
             <div className="flex items-center gap-2">
@@ -433,7 +597,8 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
             </div>
             {mode === 'map' ? (
               <>
-                <RouteMap line={q.line} index={q.answer.number - 1} />
+                <p className="-mt-1 text-[11px] font-bold text-gray-400">ゆびで うごかしたり、＋－で おおきく できるよ</p>
+                <RouteMap line={q.line} index={q.answer.number - 1} hint={showHint} reveal={answered} />
                 <p className="text-base font-black text-gray-600">？の えきは なにえき？</p>
               </>
             ) : (
@@ -451,7 +616,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
                 onClick={() => setShowHint(true)}
                 className="text-xs font-black text-gray-500 px-3 py-1.5 rounded-full bg-gray-100 active:scale-95 transition-all"
               >
-                💡 ヒント（となりの えき）
+                💡 ヒント（となりの えき{mode === 'map' && 'を ちずに だす'}）
               </button>
             )}
             {(showHint || answered) && (
