@@ -5,6 +5,7 @@ import {
   LINES, OPERATOR_LABEL, buildQuestions, stationAt, stationCode,
   type Line, type Operator, type Station, type StationQuestion,
 } from '@/lib/stations';
+import { STATION_COORDS } from '@/lib/station-coords';
 import { playCorrect, playWrong, playMiniGameStart, playNewBest, playGoalReached } from '@/lib/sounds';
 import { speakChar } from '@/lib/speech';
 
@@ -81,7 +82,11 @@ function StationBadge({ line, number, size = 'lg' }: { line: Line; number: numbe
 /** 路線図の駅名ラベル（漢字＋よみ）。 */
 function MapLabel({ x, y, anchor, station }: { x: number; y: number; anchor: 'start' | 'middle' | 'end'; station: Station }) {
   return (
-    <text x={x} y={y} textAnchor={anchor} className="fill-gray-700" style={{ fontWeight: 900 }}>
+    <text
+      x={x} y={y} textAnchor={anchor} className="fill-gray-700"
+      // 線の上に重なっても読めるよう白いふちをつける
+      stroke="white" strokeWidth={3} strokeLinejoin="round" style={{ fontWeight: 900, paintOrder: 'stroke' }}
+    >
       <tspan fontSize={12}>{station.name}</tspan>
       <tspan x={x} dy={11} fontSize={8} className="fill-gray-400">{station.kana}</tspan>
     </text>
@@ -102,60 +107,90 @@ function MapTarget({ x, y, color }: { x: number; y: number; color: string }) {
   );
 }
 
+/** 地図の目印にする大きな駅。出題の路線の両端のつぎに名前を出す。 */
+const HUBS = ['東京', '新宿', '渋谷', '池袋', '上野', '品川'];
+
 /**
- * ろせんず。路線ぜんたいを点で描き、出題の駅だけ「？」にする。
- * 名前を出すのは目印の駅（ふだんは両端）だけで、出題の駅の名前は出さない。
- * 環状線は円で、東京を右にして番号順に反時計回り（だいたいの地図の向き）。
+ * ろせんず。実際の駅の位置で路線の形を描き、出題の駅だけ「？」にする。
+ * まわりのほかの路線もうすく描いて地図にする（上が北）。
+ * 名前を出すのは出題の路線の両端と大きな駅だけで、出題の駅の名前は出さない。
  */
 function RouteMap({ line, index }: { line: Line; index: number }) {
-  const n = line.stations.length;
-  const marks = (line.landmarks ?? [0, n - 1]).filter((i) => i !== index);
+  const W = 300, PAD = 30, MAX_H = 260, MIN_H = 150;
+  const coords = STATION_COORDS[line.id];
+  const lats = coords.map(([la]) => la);
+  const lons = coords.map(([, lo]) => lo);
+  const lat0 = (Math.min(...lats) + Math.max(...lats)) / 2;
+  const kx = Math.cos((lat0 * Math.PI) / 180); // 経度1度の東西の長さを緯度に合わせる
+  const dx = Math.max((Math.max(...lons) - Math.min(...lons)) * kx, 0.01);
+  const dy = Math.max(Math.max(...lats) - Math.min(...lats), 0.01);
+  const scale = Math.min((W - PAD * 2) / dx, (MAX_H - PAD * 2) / dy);
+  const H = Math.max(MIN_H, dy * scale + PAD * 2);
+  const cLon = (Math.min(...lons) + Math.max(...lons)) / 2;
+  const cLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+  const proj = ([la, lo]: [number, number]) => ({
+    x: W / 2 + (lo - cLon) * kx * scale,
+    y: H / 2 - (la - cLat) * scale,
+  });
+  const pathOf = (l: Line) => {
+    const ps = STATION_COORDS[l.id].map(proj);
+    return ps.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('') + (l.loop ? 'Z' : '');
+  };
 
-  if (line.loop) {
-    const cx = 150, cy = 118, r = 78;
-    const pos = (i: number) => {
-      const t = (2 * Math.PI * i) / n;
-      return { x: cx + r * Math.cos(t), y: cy - r * Math.sin(t), cos: Math.cos(t), sin: Math.sin(t) };
-    };
-    const target = pos(index);
-    return (
-      <svg viewBox="0 0 300 236" className="w-full" role="img" aria-label={`${line.name}の ろせんず`}>
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke={line.color} strokeWidth={7} />
-        {line.stations.map((_, i) => {
-          const p = pos(i);
-          return <circle key={i} cx={p.x} cy={p.y} r={3.5} fill="white" stroke={line.color} strokeWidth={2} />;
-        })}
-        {marks.map((i) => {
-          const p = pos(i);
-          const lr = r + 16;
-          const anchor = p.cos > 0.3 ? 'start' : p.cos < -0.3 ? 'end' : 'middle';
-          // 上半分はラベルを点の上に、下半分は下に出す（よみの2行目ぶんずらす）
-          const y = cy - lr * p.sin + (p.sin > 0.3 ? -8 : p.sin < -0.3 ? 6 : 0);
-          return <MapLabel key={i} x={cx + lr * p.cos} y={y} anchor={anchor} station={stationAt(line, i)} />;
-        })}
-        <MapTarget x={target.x} y={target.y} color={line.color} />
-      </svg>
-    );
+  const pts = coords.map(proj);
+  const target = pts[index];
+  const answerName = line.stations[index].split('|')[0];
+
+  // 名前を出す駅：両端 → 大きな駅（ほかの路線のものも、地図に入っていれば）。重なるものは出さない
+  const n = coords.length;
+  const candidates: { st: Station; p: { x: number; y: number } }[] = [];
+  for (const i of line.loop ? [] : [0, n - 1]) candidates.push({ st: stationAt(line, i), p: pts[i] });
+  for (const hub of HUBS) {
+    for (const l of LINES) {
+      const i = l.stations.findIndex((s) => s.startsWith(`${hub}|`));
+      if (i < 0) continue;
+      candidates.push({ st: stationAt(l, i), p: proj(STATION_COORDS[l.id][i]) });
+      break;
+    }
+  }
+  // ラベルの置き場所と、文字が占める四角。下にはみ出すときは点の上に出す
+  const place = ({ st, p }: (typeof candidates)[number]) => {
+    const anchor: 'start' | 'middle' | 'end' = p.x < 60 ? 'start' : p.x > W - 60 ? 'end' : 'middle';
+    const y = p.y + 22 > H - 4 ? p.y - 18 : p.y + 16;
+    const w = Math.max(st.name.length * 12, st.kana.length * 8);
+    const x0 = anchor === 'start' ? p.x : anchor === 'end' ? p.x - w : p.x - w / 2;
+    return { anchor, y, box: { x0, x1: x0 + w, y0: y - 11, y1: y + 13 } };
+  };
+  type Box = { x0: number; x1: number; y0: number; y1: number };
+  const hit = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+  const targetBox = { x0: target.x - 16, x1: target.x + 16, y0: target.y - 16, y1: target.y + 16 };
+  const labels: ((typeof candidates)[number] & ReturnType<typeof place>)[] = [];
+  for (const c of candidates) {
+    const { x, y } = c.p;
+    if (c.st.name === answerName || labels.some((l) => l.st.name === c.st.name)) continue;
+    if (x < 4 || x > W - 4 || y < 4 || y > H - 4) continue;
+    const pl = place(c);
+    if (hit(pl.box, targetBox) || labels.some((l) => hit(l.box, pl.box))) continue;
+    labels.push({ ...c, ...pl });
   }
 
-  const left = 16, right = 284, y = 34;
-  const xAt = (i: number) => left + ((right - left) * i) / (n - 1);
   return (
-    <svg viewBox="0 0 300 80" className="w-full" role="img" aria-label={`${line.name}の ろせんず`}>
-      <line x1={left} y1={y} x2={right} y2={y} stroke={line.color} strokeWidth={7} strokeLinecap="round" />
-      {line.stations.map((_, i) => (
-        <circle key={i} cx={xAt(i)} cy={y} r={3.5} fill="white" stroke={line.color} strokeWidth={2} />
+    <svg viewBox={`0 0 ${W} ${H.toFixed(0)}`} className="w-full rounded-2xl" style={{ background: '#f8f9fa' }} role="img" aria-label={`${line.name}の ろせんず`}>
+      {LINES.filter((l) => l.id !== line.id).map((l) => (
+        <path key={l.id} d={pathOf(l)} fill="none" stroke={l.color} strokeOpacity={0.25} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" />
       ))}
-      {marks.map((i) => (
-        <MapLabel
-          key={i}
-          x={i === 0 ? left - 6 : i === n - 1 ? right + 6 : xAt(i)}
-          y={y + 30}
-          anchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}
-          station={stationAt(line, i)}
-        />
+      <path d={pathOf(line)} fill="none" stroke={line.color} strokeWidth={6} strokeLinejoin="round" strokeLinecap="round" />
+      {pts.map((p, i) => (
+        <circle key={i} cx={p.x} cy={p.y} r={3.5} fill="white" stroke={line.color} strokeWidth={2} />
       ))}
-      <MapTarget x={xAt(index)} y={y} color={line.color} />
+      {labels.map(({ st, p, anchor, y }) => (
+        <g key={st.name}>
+          <circle cx={p.x} cy={p.y} r={2.5} fill="#495057" />
+          <MapLabel x={p.x} y={y} anchor={anchor} station={st} />
+        </g>
+      ))}
+      <text x={W - 8} y={16} textAnchor="end" fontSize={10} fontWeight={900} className="fill-gray-400">↑きた</text>
+      <MapTarget x={target.x} y={target.y} color={line.color} />
     </svg>
   );
 }

@@ -19,8 +19,7 @@ export interface Line {
   colorName: string; // 'きみどり'
   operator: Operator;
   stations: string[]; // '東京|とうきょう'
-  loop?: boolean;      // 環状線（ろせんずモードで円に描く）
-  landmarks?: number[]; // ろせんずモードで名前を出す駅の index（無ければ両端）
+  loop?: boolean;      // 環状線（ろせんずモードで線を閉じる）
 }
 
 export const OPERATOR_LABEL: Record<Operator, string> = {
@@ -34,7 +33,7 @@ export const LINES: Line[] = [
   {
     id: 'yamanote', code: 'JY', name: '山手線', kana: 'やまのてせん',
     color: '#9ACD32', colorName: 'きみどり', operator: 'jr',
-    loop: true, landmarks: [0, 4, 12, 16, 19, 24], // 東京・上野・池袋・新宿・渋谷・品川
+    loop: true,
     stations: [
       '東京|とうきょう', '神田|かんだ', '秋葉原|あきはばら', '御徒町|おかちまち', '上野|うえの',
       '鶯谷|うぐいすだに', '日暮里|にっぽり', '西日暮里|にしにっぽり', '田端|たばた', '駒込|こまごめ',
