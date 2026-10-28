@@ -254,8 +254,9 @@ export function buildQuestions(lines: Line[], count: number, choiceCount = 4, ne
       line,
       answer,
       choices,
-      prev: i > 0 ? stationAt(line, i - 1) : null,
-      next: i < line.stations.length - 1 ? stationAt(line, i + 1) : null,
+      // 環状線は 01 と最後の駅もとなりどうし
+      prev: i > 0 ? stationAt(line, i - 1) : line.loop ? stationAt(line, line.stations.length - 1) : null,
+      next: i < line.stations.length - 1 ? stationAt(line, i + 1) : line.loop ? stationAt(line, 0) : null,
     };
   });
 }
