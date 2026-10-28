@@ -19,6 +19,7 @@ export interface Line {
   colorName: string; // 'きみどり'
   operator: Operator;
   stations: string[]; // '東京|とうきょう'
+  loop?: boolean;      // 環状線（ろせんずモードで線を閉じる）
 }
 
 export const OPERATOR_LABEL: Record<Operator, string> = {
@@ -32,6 +33,7 @@ export const LINES: Line[] = [
   {
     id: 'yamanote', code: 'JY', name: '山手線', kana: 'やまのてせん',
     color: '#9ACD32', colorName: 'きみどり', operator: 'jr',
+    loop: true,
     stations: [
       '東京|とうきょう', '神田|かんだ', '秋葉原|あきはばら', '御徒町|おかちまち', '上野|うえの',
       '鶯谷|うぐいすだに', '日暮里|にっぽり', '西日暮里|にしにっぽり', '田端|たばた', '駒込|こまごめ',
@@ -236,14 +238,15 @@ function shuffle<T>(arr: T[]): T[] {
 
 /**
  * 出題する lines から重複なしで count 問つくる。
- * 選択肢は同じ路線の駅から選ぶ（番号の近い駅を混ぜて、当てずっぽうで当たりにくくする）。
+ * 選択肢は同じ路線の駅から選ぶ。near のときは番号の近い駅を混ぜて当てずっぽうで当たりにくくし、
+ * そうでなければ路線全体から選ぶ（ろせんずモードのふつう：だいたいの位置で見当をつけられる）。
  */
-export function buildQuestions(lines: Line[], count: number, choiceCount = 4): StationQuestion[] {
+export function buildQuestions(lines: Line[], count: number, choiceCount = 4, near = true): StationQuestion[] {
   const pool = shuffle(lines.flatMap((line) => line.stations.map((_, i) => ({ line, i }))));
   return pool.slice(0, count).map(({ line, i }) => {
     const answer = stationAt(line, i);
     const others = line.stations
-      .map((_, j) => ({ j, key: Math.abs(j - i) + Math.random() * 4 }))
+      .map((_, j) => ({ j, key: near ? Math.abs(j - i) + Math.random() * 4 : Math.random() }))
       .filter(({ j }) => j !== i)
       .sort((a, b) => a.key - b.key);
     const choices = shuffle([answer, ...others.slice(0, choiceCount - 1).map(({ j }) => stationAt(line, j))]);

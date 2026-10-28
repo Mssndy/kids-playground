@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
-  LINES, OPERATOR_LABEL, buildQuestions, stationCode,
+  LINES, OPERATOR_LABEL, buildQuestions, stationAt, stationCode,
   type Line, type Operator, type Station, type StationQuestion,
 } from '@/lib/stations';
+import { STATION_COORDS } from '@/lib/station-coords';
 import { playCorrect, playWrong, playMiniGameStart, playNewBest, playGoalReached } from '@/lib/sounds';
 import { speakChar } from '@/lib/speech';
 
@@ -15,6 +16,12 @@ interface Props {
 
 type Phase = 'select' | 'quiz' | 'done';
 type Level = 'normal' | 'hard';
+type Mode = 'number' | 'map';
+
+const MODES: Record<Mode, { label: string; icon: string; lead: string }> = {
+  number: { label: 'ばんごう', icon: '🔢', lead: 'えきの ばんごうを みて、えきの なまえを あてよう' },
+  map:    { label: 'ろせんず', icon: '🗺️', lead: 'ろせんずの ？の ばしょの えきを あてよう' },
+};
 
 const LEVELS: Record<Level, { label: string; choices: number }> = {
   normal: { label: 'ふつう', choices: 4 },
@@ -25,24 +32,25 @@ const QUESTION_COUNT = 10;
 const ALL_ID = 'all';
 const THEME = 'linear-gradient(135deg, #20c997 0%, #1c7ed6 100%)';
 
-function bestKey(playerName: string, lineId: string, level: Level) {
-  // ふつうは以前からのキーのまま（記録を消さない）
+function bestKey(playerName: string, lineId: string, level: Level, mode: Mode) {
+  // ばんごうモードは以前からのキーのまま（記録を消さない）。ふつうは level も付けない
+  const prefix = mode === 'map' ? 'station_best_map_' : 'station_best_';
   return level === 'normal'
-    ? `station_best_${lineId}_${playerName}`
-    : `station_best_${level}_${lineId}_${playerName}`;
+    ? `${prefix}${lineId}_${playerName}`
+    : `${prefix}${level}_${lineId}_${playerName}`;
 }
 
-function loadBest(playerName: string, lineId: string, level: Level): number {
+function loadBest(playerName: string, lineId: string, level: Level, mode: Mode): number {
   try {
-    return parseInt(localStorage.getItem(bestKey(playerName, lineId, level)) ?? '0', 10);
+    return parseInt(localStorage.getItem(bestKey(playerName, lineId, level, mode)) ?? '0', 10);
   } catch {
     return 0;
   }
 }
 
-function saveBest(playerName: string, lineId: string, level: Level, score: number) {
+function saveBest(playerName: string, lineId: string, level: Level, mode: Mode, score: number) {
   try {
-    localStorage.setItem(bestKey(playerName, lineId, level), String(score));
+    localStorage.setItem(bestKey(playerName, lineId, level, mode), String(score));
   } catch {
     // 保存できなくても遊べる
   }
@@ -71,6 +79,122 @@ function StationBadge({ line, number, size = 'lg' }: { line: Line; number: numbe
   );
 }
 
+/** 路線図の駅名ラベル（漢字＋よみ）。 */
+function MapLabel({ x, y, anchor, station }: { x: number; y: number; anchor: 'start' | 'middle' | 'end'; station: Station }) {
+  return (
+    <text
+      x={x} y={y} textAnchor={anchor} className="fill-gray-700"
+      // 線の上に重なっても読めるよう白いふちをつける
+      stroke="white" strokeWidth={3} strokeLinejoin="round" style={{ fontWeight: 900, paintOrder: 'stroke' }}
+    >
+      <tspan fontSize={12}>{station.name}</tspan>
+      <tspan x={x} dy={11} fontSize={8} className="fill-gray-400">{station.kana}</tspan>
+    </text>
+  );
+}
+
+/** 「？」の駅。ぴょこぴょこ光らせて目立たせる。 */
+function MapTarget({ x, y, color }: { x: number; y: number; color: string }) {
+  return (
+    <g>
+      <circle cx={x} cy={y} r={11} fill={color} opacity={0.35}>
+        <animate attributeName="r" values="11;17;11" dur="1.6s" repeatCount="indefinite" />
+        <animate attributeName="opacity" values="0.35;0;0.35" dur="1.6s" repeatCount="indefinite" />
+      </circle>
+      <circle cx={x} cy={y} r={11} fill="white" stroke={color} strokeWidth={4} />
+      <text x={x} y={y + 5} textAnchor="middle" fontSize={14} fontWeight={900} className="fill-gray-800">？</text>
+    </g>
+  );
+}
+
+/** 地図の目印にする大きな駅。出題の路線の両端のつぎに名前を出す。 */
+const HUBS = ['東京', '新宿', '渋谷', '池袋', '上野', '品川'];
+
+/**
+ * ろせんず。実際の駅の位置で路線の形を描き、出題の駅だけ「？」にする。
+ * まわりのほかの路線もうすく描いて地図にする（上が北）。
+ * 名前を出すのは出題の路線の両端と大きな駅だけで、出題の駅の名前は出さない。
+ */
+function RouteMap({ line, index }: { line: Line; index: number }) {
+  const W = 300, PAD = 30, MAX_H = 260, MIN_H = 150;
+  const coords = STATION_COORDS[line.id];
+  const lats = coords.map(([la]) => la);
+  const lons = coords.map(([, lo]) => lo);
+  const lat0 = (Math.min(...lats) + Math.max(...lats)) / 2;
+  const kx = Math.cos((lat0 * Math.PI) / 180); // 経度1度の東西の長さを緯度に合わせる
+  const dx = Math.max((Math.max(...lons) - Math.min(...lons)) * kx, 0.01);
+  const dy = Math.max(Math.max(...lats) - Math.min(...lats), 0.01);
+  const scale = Math.min((W - PAD * 2) / dx, (MAX_H - PAD * 2) / dy);
+  const H = Math.max(MIN_H, dy * scale + PAD * 2);
+  const cLon = (Math.min(...lons) + Math.max(...lons)) / 2;
+  const cLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+  const proj = ([la, lo]: [number, number]) => ({
+    x: W / 2 + (lo - cLon) * kx * scale,
+    y: H / 2 - (la - cLat) * scale,
+  });
+  const pathOf = (l: Line) => {
+    const ps = STATION_COORDS[l.id].map(proj);
+    return ps.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('') + (l.loop ? 'Z' : '');
+  };
+
+  const pts = coords.map(proj);
+  const target = pts[index];
+  const answerName = line.stations[index].split('|')[0];
+
+  // 名前を出す駅：両端 → 大きな駅（ほかの路線のものも、地図に入っていれば）。重なるものは出さない
+  const n = coords.length;
+  const candidates: { st: Station; p: { x: number; y: number } }[] = [];
+  for (const i of line.loop ? [] : [0, n - 1]) candidates.push({ st: stationAt(line, i), p: pts[i] });
+  for (const hub of HUBS) {
+    for (const l of LINES) {
+      const i = l.stations.findIndex((s) => s.startsWith(`${hub}|`));
+      if (i < 0) continue;
+      candidates.push({ st: stationAt(l, i), p: proj(STATION_COORDS[l.id][i]) });
+      break;
+    }
+  }
+  // ラベルの置き場所と、文字が占める四角。下にはみ出すときは点の上に出す
+  const place = ({ st, p }: (typeof candidates)[number]) => {
+    const anchor: 'start' | 'middle' | 'end' = p.x < 60 ? 'start' : p.x > W - 60 ? 'end' : 'middle';
+    const y = p.y + 22 > H - 4 ? p.y - 18 : p.y + 16;
+    const w = Math.max(st.name.length * 12, st.kana.length * 8);
+    const x0 = anchor === 'start' ? p.x : anchor === 'end' ? p.x - w : p.x - w / 2;
+    return { anchor, y, box: { x0, x1: x0 + w, y0: y - 11, y1: y + 13 } };
+  };
+  type Box = { x0: number; x1: number; y0: number; y1: number };
+  const hit = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+  const targetBox = { x0: target.x - 16, x1: target.x + 16, y0: target.y - 16, y1: target.y + 16 };
+  const labels: ((typeof candidates)[number] & ReturnType<typeof place>)[] = [];
+  for (const c of candidates) {
+    const { x, y } = c.p;
+    if (c.st.name === answerName || labels.some((l) => l.st.name === c.st.name)) continue;
+    if (x < 4 || x > W - 4 || y < 4 || y > H - 4) continue;
+    const pl = place(c);
+    if (hit(pl.box, targetBox) || labels.some((l) => hit(l.box, pl.box))) continue;
+    labels.push({ ...c, ...pl });
+  }
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H.toFixed(0)}`} className="w-full rounded-2xl" style={{ background: '#f8f9fa' }} role="img" aria-label={`${line.name}の ろせんず`}>
+      {LINES.filter((l) => l.id !== line.id).map((l) => (
+        <path key={l.id} d={pathOf(l)} fill="none" stroke={l.color} strokeOpacity={0.25} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" />
+      ))}
+      <path d={pathOf(line)} fill="none" stroke={line.color} strokeWidth={6} strokeLinejoin="round" strokeLinecap="round" />
+      {pts.map((p, i) => (
+        <circle key={i} cx={p.x} cy={p.y} r={3.5} fill="white" stroke={line.color} strokeWidth={2} />
+      ))}
+      {labels.map(({ st, p, anchor, y }) => (
+        <g key={st.name}>
+          <circle cx={p.x} cy={p.y} r={2.5} fill="#495057" />
+          <MapLabel x={p.x} y={y} anchor={anchor} station={st} />
+        </g>
+      ))}
+      <text x={W - 8} y={16} textAnchor="end" fontSize={10} fontWeight={900} className="fill-gray-400">↑きた</text>
+      <MapTarget x={target.x} y={target.y} color={line.color} />
+    </svg>
+  );
+}
+
 function StationName({ station, size = 'md' }: { station: Station; size?: 'sm' | 'md' | 'lg' }) {
   const text = { sm: 'text-sm', md: 'text-lg', lg: 'text-3xl' }[size];
   const rt = { sm: 'text-[9px]', md: 'text-[10px]', lg: 'text-xs' }[size];
@@ -86,6 +210,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
   const [phase, setPhase]         = useState<Phase>('select');
   const [lineId, setLineId]       = useState<string>(ALL_ID);
   const [level, setLevel]         = useState<Level>('normal');
+  const [mode, setMode]           = useState<Mode>('number');
   const [questions, setQuestions] = useState<StationQuestion[]>([]);
   const [qIndex, setQIndex]       = useState(0);
   const [picked, setPicked]       = useState<string | null>(null);
@@ -104,7 +229,9 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
   function start(id: string) {
     const lines = id === ALL_ID ? LINES : LINES.filter((l) => l.id === id);
     setLineId(id);
-    setQuestions(buildQuestions(lines, QUESTION_COUNT, LEVELS[level].choices));
+    // ろせんずのふつうは路線ぜんたいから選択肢を出す（となりの駅ばかりだと位置だけでは決めきれない）
+    const near = mode === 'number' || level === 'hard';
+    setQuestions(buildQuestions(lines, QUESTION_COUNT, LEVELS[level].choices, near));
     setQIndex(0);
     setPicked(null);
     setShowHint(false);
@@ -114,9 +241,9 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
   }
 
   function finish(finalScore: number) {
-    const prevBest = loadBest(playerName, lineId, level);
+    const prevBest = loadBest(playerName, lineId, level, mode);
     const newBest = finalScore > prevBest;
-    if (newBest) saveBest(playerName, lineId, level, finalScore);
+    if (newBest) saveBest(playerName, lineId, level, mode, finalScore);
     setBest(Math.max(prevBest, finalScore));
     setIsBest(newBest);
     if (newBest) playNewBest(); else playGoalReached();
@@ -173,6 +300,23 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
       {/* ── SELECT ── */}
       {phase === 'select' && (
         <div className="flex flex-col items-center gap-4 w-full max-w-sm px-4 animate-[fade-in_0.25s_ease_both]">
+          <div className="w-full grid grid-cols-2 gap-2 p-1 rounded-2xl bg-white shadow-inner" role="radiogroup" aria-label="あそびかた">
+            {(Object.keys(MODES) as Mode[]).map((m) => (
+              <button
+                key={m}
+                role="radio"
+                aria-checked={mode === m}
+                onClick={() => setMode(m)}
+                className="py-2 rounded-xl text-sm font-black transition-all active:scale-95"
+                style={mode === m
+                  ? { background: THEME, color: 'white' }
+                  : { background: 'transparent', color: '#868e96' }}
+              >
+                {MODES[m].icon} {MODES[m].label}
+              </button>
+            ))}
+          </div>
+
           <div className="w-full grid grid-cols-2 gap-2 p-1 rounded-2xl bg-white shadow-inner" role="radiogroup" aria-label="むずかしさ">
             {(Object.keys(LEVELS) as Level[]).map((lv) => (
               <button
@@ -197,7 +341,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
           >
             <p className="text-4xl mb-1">🚃🚇</p>
             <p className="text-xl font-black text-white drop-shadow">ぜんぶの せんろで スタート！</p>
-            <p className="text-xs font-bold text-white/80 mt-1">えきの ばんごうを みて、えきの なまえを あてよう</p>
+            <p className="text-xs font-bold text-white/80 mt-1">{MODES[mode].lead}</p>
           </button>
 
           <p className="text-sm font-black text-gray-400">せんろを えらんでも いいよ 👇</p>
@@ -231,7 +375,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
         <div key={qIndex} className="flex flex-col items-center gap-4 w-full max-w-sm px-4 animate-[fade-in_0.25s_ease_both]">
           {/* Progress */}
           <div className="w-full flex items-center justify-between text-sm font-black text-gray-500">
-            <span>{qIndex + 1} / {questions.length} もんめ{level === 'hard' && ' 🔥'}</span>
+            <span>{qIndex + 1} / {questions.length} もんめ{mode === 'map' && ' 🗺️'}{level === 'hard' && ' 🔥'}</span>
             <span>⭕ {score}</span>
           </div>
 
@@ -248,10 +392,19 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
               </ruby>
               <span className="text-xs font-bold text-gray-400">（{q.line.colorName}）</span>
             </div>
-            <StationBadge line={q.line} number={q.answer.number} />
-            <p className="text-base font-black text-gray-600">
-              {stationCode(q.line, q.answer.number)} は なにえき？
-            </p>
+            {mode === 'map' ? (
+              <>
+                <RouteMap line={q.line} index={q.answer.number - 1} />
+                <p className="text-base font-black text-gray-600">？の えきは なにえき？</p>
+              </>
+            ) : (
+              <>
+                <StationBadge line={q.line} number={q.answer.number} />
+                <p className="text-base font-black text-gray-600">
+                  {stationCode(q.line, q.answer.number)} は なにえき？
+                </p>
+              </>
+            )}
 
             {/* Hint */}
             {!answered && !showHint && (
@@ -264,9 +417,9 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
             )}
             {(showHint || answered) && (
               <div className="w-full flex items-center justify-center gap-2 text-[11px] font-bold text-gray-500">
-                {q.prev && <span>◀ {stationCode(q.line, q.prev.number)} {q.prev.name}</span>}
+                {q.prev && <span>◀ {mode === 'number' && stationCode(q.line, q.prev.number)} {q.prev.name}</span>}
                 <span className="text-gray-300">|</span>
-                {q.next && <span>{stationCode(q.line, q.next.number)} {q.next.name} ▶</span>}
+                {q.next && <span>{mode === 'number' && stationCode(q.line, q.next.number)} {q.next.name} ▶</span>}
               </div>
             )}
           </div>
@@ -312,7 +465,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
               ) : (
                 <>
                   <p className="text-lg font-black text-gray-600 text-center">
-                    おしい！ {stationCode(q.line, q.answer.number)} は<br />
+                    おしい！ {mode === 'map' ? '？の えき' : stationCode(q.line, q.answer.number)} は<br />
                     <span style={{ color: '#1c7ed6' }}><StationName station={q.answer} size="lg" /></span> だよ
                   </p>
                   <button
@@ -345,7 +498,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
               <span className="text-base font-black text-white/80">/ {questions.length}</span>
             </div>
             <p className="text-xs font-bold text-white/80 mt-2">
-              {lineId === ALL_ID ? 'ぜんぶの せんろ' : LINES.find((l) => l.id === lineId)?.name}（{LEVELS[level].label}）の さいこう：{best}もん
+              {lineId === ALL_ID ? 'ぜんぶの せんろ' : LINES.find((l) => l.id === lineId)?.name}（{MODES[mode].label}・{LEVELS[level].label}）の さいこう：{best}もん
             </p>
           </div>
           <button
