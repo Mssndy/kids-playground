@@ -6,6 +6,7 @@ import {
   type Line, type Operator, type Station, type StationQuestion,
 } from '@/lib/stations';
 import { STATION_COORDS } from '@/lib/station-coords';
+import { ISLANDS, PALACE, RIVERS, SEA } from '@/lib/map-terrain';
 import { playCorrect, playWrong, playMiniGameStart, playNewBest, playGoalReached } from '@/lib/sounds';
 import { speakChar } from '@/lib/speech';
 
@@ -107,6 +108,27 @@ function MapTarget({ x, y, color }: { x: number; y: number; color: string }) {
   );
 }
 
+/** 地図の色 */
+const LAND = '#f6f4ee';
+const WATER = '#cfe6fb';
+const PARK = '#d3f0d4';
+/** 太く描く大きな川 */
+const BIG_RIVERS = ['荒川', '江戸川', '多摩川', '入間川'];
+/** 「とうきょうわん」の文字を置く位置の候補（沖から順に。地図に入って海の上にあるものを使う） */
+const BAY_LABELS: [number, number][] = [
+  [35.585, 139.905], [35.6, 139.86], [35.6, 139.83], [35.615, 139.81], [35.6, 139.79], [35.585, 139.77], [35.57, 139.76],
+];
+
+function inside([la, lo]: [number, number], poly: [number, number][]) {
+  let hit = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [ai, oi] = poly[i], [aj, oj] = poly[j];
+    if ((ai > la) !== (aj > la) && lo < ((oj - oi) * (la - ai)) / (aj - ai) + oi) hit = !hit;
+  }
+  return hit;
+}
+const isSea = (pt: [number, number]) => inside(pt, SEA) && !ISLANDS.some((isl) => inside(pt, isl));
+
 /** 地図の目印にする大きな駅。出題の路線の両端のつぎに名前を出す。 */
 const HUBS = ['東京', '新宿', '渋谷', '池袋', '上野', '品川'];
 
@@ -132,10 +154,10 @@ function RouteMap({ line, index }: { line: Line; index: number }) {
     x: W / 2 + (lo - cLon) * kx * scale,
     y: H / 2 - (la - cLat) * scale,
   });
-  const pathOf = (l: Line) => {
-    const ps = STATION_COORDS[l.id].map(proj);
-    return ps.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('') + (l.loop ? 'Z' : '');
-  };
+  const pathOf = (coordList: [number, number][], closed = false) =>
+    coordList.map(proj).map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('') + (closed ? 'Z' : '');
+  const linePath = (l: Line) => pathOf(STATION_COORDS[l.id], l.loop);
+  const bay = BAY_LABELS.filter(isSea).map(proj).find((p) => p.x > 40 && p.x < W - 40 && p.y > 20 && p.y < H - 8);
 
   const pts = coords.map(proj);
   const target = pts[index];
@@ -175,11 +197,26 @@ function RouteMap({ line, index }: { line: Line; index: number }) {
   }
 
   return (
-    <svg viewBox={`0 0 ${W} ${H.toFixed(0)}`} className="w-full rounded-2xl" style={{ background: '#f8f9fa' }} role="img" aria-label={`${line.name}の ろせんず`}>
+    <svg viewBox={`0 0 ${W} ${H.toFixed(0)}`} className="w-full rounded-2xl" style={{ background: LAND }} role="img" aria-label={`${line.name}の ろせんず`}>
+      {/* 地形：海 → 島 → 皇居 → 川 */}
+      <path d={pathOf(SEA, true)} fill={WATER} />
+      {ISLANDS.map((isl, i) => <path key={i} d={pathOf(isl, true)} fill={LAND} />)}
+      <path d={pathOf(PALACE, true)} fill={PARK} />
+      {Object.entries(RIVERS).flatMap(([name, parts]) => parts.map((part, i) => (
+        <path
+          key={`${name}${i}`} d={pathOf(part)} fill="none" stroke={WATER}
+          strokeWidth={BIG_RIVERS.includes(name) ? 4 : 2.5} strokeLinejoin="round" strokeLinecap="round"
+        />
+      )))}
+      {bay && (
+        <text x={bay.x} y={bay.y} textAnchor="middle" fontSize={10} fontWeight={900} fill="#74a9d8" letterSpacing={2}>
+          とうきょうわん
+        </text>
+      )}
       {LINES.filter((l) => l.id !== line.id).map((l) => (
-        <path key={l.id} d={pathOf(l)} fill="none" stroke={l.color} strokeOpacity={0.25} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" />
+        <path key={l.id} d={linePath(l)} fill="none" stroke={l.color} strokeOpacity={0.25} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" />
       ))}
-      <path d={pathOf(line)} fill="none" stroke={line.color} strokeWidth={6} strokeLinejoin="round" strokeLinecap="round" />
+      <path d={linePath(line)} fill="none" stroke={line.color} strokeWidth={6} strokeLinejoin="round" strokeLinecap="round" />
       {pts.map((p, i) => (
         <circle key={i} cx={p.x} cy={p.y} r={3.5} fill="white" stroke={line.color} strokeWidth={2} />
       ))}
@@ -190,6 +227,8 @@ function RouteMap({ line, index }: { line: Line; index: number }) {
         </g>
       ))}
       <text x={W - 8} y={16} textAnchor="end" fontSize={10} fontWeight={900} className="fill-gray-400">↑きた</text>
+      {/* 地形のデータの出典（OpenStreetMap の利用条件で表示が必要） */}
+      <text x={W - 4} y={H - 4} textAnchor="end" fontSize={6} className="fill-gray-400">© OpenStreetMap contributors</text>
       <MapTarget x={target.x} y={target.y} color={line.color} />
     </svg>
   );
