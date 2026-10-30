@@ -17,11 +17,12 @@ interface Props {
 
 type Phase = 'select' | 'quiz' | 'done';
 type Level = 'normal' | 'hard';
-type Mode = 'number' | 'map';
+type Mode = 'number' | 'map' | 'both';
 
 const MODES: Record<Mode, { label: string; icon: string; lead: string }> = {
   number: { label: 'ばんごう', icon: '🔢', lead: 'えきの ばんごうを みて、えきの なまえを あてよう' },
   map:    { label: 'ろせんず', icon: '🗺️', lead: 'ろせんずの ？の ばしょの えきを あてよう' },
+  both:   { label: 'りょうほう', icon: '🔢🗺️', lead: 'ろせんずと ばんごうを みて、えきの なまえを あてよう' },
 };
 
 const LEVELS: Record<Level, { label: string; choices: number }> = {
@@ -35,7 +36,7 @@ const THEME = 'linear-gradient(135deg, #20c997 0%, #1c7ed6 100%)';
 
 function bestKey(playerName: string, lineId: string, level: Level, mode: Mode) {
   // ばんごうモードは以前からのキーのまま（記録を消さない）。ふつうは level も付けない
-  const prefix = mode === 'map' ? 'station_best_map_' : 'station_best_';
+  const prefix = mode === 'number' ? 'station_best_' : `station_best_${mode}_`;
   return level === 'normal'
     ? `${prefix}${lineId}_${playerName}`
     : `${prefix}${level}_${lineId}_${playerName}`;
@@ -81,7 +82,12 @@ function StationBadge({ line, number, size = 'lg' }: { line: Line; number: numbe
 }
 
 /** 路線図の駅名ラベル（漢字＋よみ）。 */
-function MapLabel({ x, y, anchor, station }: { x: number; y: number; anchor: 'start' | 'middle' | 'end'; station: Station }) {
+/** 地図に出す駅。りょうほうモードでは出題の路線の駅に番号（JY01 など）を添える。 */
+type MapStation = Station & { code?: string };
+
+const subLine = (st: MapStation) => (st.code ? `${st.code} ${st.kana}` : st.kana);
+
+function MapLabel({ x, y, anchor, station }: { x: number; y: number; anchor: 'start' | 'middle' | 'end'; station: MapStation }) {
   return (
     <text
       x={x} y={y} textAnchor={anchor} className="fill-gray-700"
@@ -89,13 +95,24 @@ function MapLabel({ x, y, anchor, station }: { x: number; y: number; anchor: 'st
       stroke="white" strokeWidth={3} strokeLinejoin="round" style={{ fontWeight: 900, paintOrder: 'stroke' }}
     >
       <tspan fontSize={12}>{station.name}</tspan>
-      <tspan x={x} dy={11} fontSize={8} className="fill-gray-400">{station.kana}</tspan>
+      <tspan x={x} dy={11} fontSize={8} className="fill-gray-400">{subLine(station)}</tspan>
     </text>
   );
 }
 
-/** 「？」の駅。黄色と黒で目立たせ、光の輪と上の矢印をぴょこぴょこ動かす。 */
-function MapTarget({ x, y }: { x: number; y: number }) {
+/** 「？」の駅番号の看板の四角。ふだんは矢印の上、地図の上の端に近いときは「？」の下。 */
+function badgeBox(x: number, y: number, code: string): Box {
+  const w = code.length * 10 + 14;
+  const y0 = y < 64 ? y + 20 : y - 58;
+  return { x0: x - w / 2, x1: x + w / 2, y0, y1: y0 + 22 };
+}
+
+/**
+ * 「？」の駅。黄色と黒で目立たせ、光の輪と上の矢印をぴょこぴょこ動かす。
+ * code があれば駅番号の看板を出す（りょうほうモード）。
+ */
+function MapTarget({ x, y, code, color }: { x: number; y: number; code?: string; color: string }) {
+  const b = code ? badgeBox(x, y, code) : null;
   return (
     <g>
       <circle cx={x} cy={y} r={14} fill="#ffd43b" opacity={0.7}>
@@ -107,6 +124,12 @@ function MapTarget({ x, y }: { x: number; y: number }) {
       <path d={`M${x - 7},${y - 30} L${x + 7},${y - 30} L${x},${y - 20} Z`} fill="#212529">
         <animateTransform attributeName="transform" type="translate" values="0,0;0,-5;0,0" dur="0.8s" repeatCount="indefinite" />
       </path>
+      {b && (
+        <g>
+          <rect x={b.x0} y={b.y0} width={b.x1 - b.x0} height={22} rx={6} fill="white" stroke={color} strokeWidth={3} />
+          <text x={x} y={b.y0 + 16.5} textAnchor="middle" fontSize={15} fontWeight={900} fill="#212529">{code}</text>
+        </g>
+      )}
     </g>
   );
 }
@@ -138,7 +161,7 @@ const HUBS = ['東京', '新宿', '渋谷', '池袋', '上野', '品川'];
 type Pt = { x: number; y: number };
 type Box = { x0: number; x1: number; y0: number; y1: number };
 type Anchor = 'start' | 'middle' | 'end';
-type Placed = { st: Station; p: Pt; anchor: Anchor; x: number; y: number; box: Box };
+type Placed = { st: MapStation; p: Pt; anchor: Anchor; x: number; y: number; box: Box };
 
 const overlap = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
 
@@ -148,8 +171,8 @@ const POSITIONS = ['below', 'above', 'right', 'left'] as const;
  * 駅名ラベルを点 p のまわりの pos に置いたときの位置と、文字が占める四角。
  * gap で点から離す（「？」の駅は印が大きいので離す）。上下に置くときは、地図の端からはみ出さないよう左右に寄せる。
  */
-function placeLabel(st: Station, p: Pt, pos: (typeof POSITIONS)[number], width: number, gap = 0): Placed {
-  const w = Math.max(st.name.length * 12, st.kana.length * 8);
+function placeLabel(st: MapStation, p: Pt, pos: (typeof POSITIONS)[number], width: number, gap = 0): Placed {
+  const w = Math.max(st.name.length * 12, subLine(st).length * 8);
   let { anchor, x } = {
     below: { anchor: 'middle' as Anchor, x: p.x },
     above: { anchor: 'middle' as Anchor, x: p.x },
@@ -172,9 +195,12 @@ const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
  * まわりのほかの路線もうすく描いて地図にする（上が北）。
  * 名前を出すのは出題の路線の両端と大きな駅だけで、出題の駅の名前は出さない。
  * hint のときは となりの駅、reveal（答えたあと）のときは出題の駅の名前を札で出す。
+ * numbers のときは「？」の上に駅番号を出し、出題の路線の駅の名前にも番号を添える。
  * ボタン・ドラッグ・ピンチ・ホイールで動かせる。線や文字の大きさは変えず、駅の間だけ広がる。
  */
-function RouteMap({ line, index, hint, reveal }: { line: Line; index: number; hint: boolean; reveal: boolean }) {
+function RouteMap({ line, index, hint, reveal, numbers }: {
+  line: Line; index: number; hint: boolean; reveal: boolean; numbers: boolean;
+}) {
   const W = 300, PAD = 30, MAX_H = 360, MIN_H = 240;
   const coords = STATION_COORDS[line.id];
   const lats = coords.map(([la]) => la);
@@ -277,20 +303,25 @@ function RouteMap({ line, index, hint, reveal }: { line: Line; index: number; hi
   const pts = coords.map(proj);
   const n = coords.length;
   const target = pts[index];
-  const answer = stationAt(line, index);
-  // 「？」と上の矢印、右下の ＋－↺ ボタンのところには名前を置かない
+  // 出題の路線の駅（numbers のときは番号つき）
+  const onLine = (i: number): MapStation => ({ ...stationAt(line, i), code: numbers ? stationCode(line, i + 1) : undefined });
+  const answer = onLine(index);
+  // 「？」と上の矢印・番号の看板、右下の ＋－↺ ボタンのところには名前を置かない
+  const badge = answer.code ? badgeBox(target.x, target.y, answer.code) : null;
   const taken: Box[] = [
     { x0: target.x - 18, x1: target.x + 18, y0: target.y - 34, y1: target.y + 18 },
     { x0: W - 44, x1: W, y0: H - 128, y1: H },
+    ...(badge ? [badge] : []),
   ];
   const fits = (pl: Placed) => inFrame({ x: pl.box.x0, y: pl.box.y0 }, 0) && inFrame({ x: pl.box.x1, y: pl.box.y1 }, 0)
     && !taken.some((b) => overlap(b, pl.box));
   // 札：答えたあとの答え → ヒントのとなりの駅（山手線は輪なので両はしもとなり）
   const tags: (Placed & { kind: 'answer' | 'hint' })[] = [];
   if (reveal) {
-    // 答えの札は「？」の印に重ねてよいので、地図に入るかだけ見る
+    // 答えの札は「？」の印に重ねてよいので、地図に入るかと番号の看板に重ならないかだけ見る
     const pl = POSITIONS.map((pos) => placeLabel(answer, target, pos, W, 10))
-      .find((pl) => inFrame({ x: pl.box.x0, y: pl.box.y0 }, 0) && inFrame({ x: pl.box.x1, y: pl.box.y1 }, 0));
+      .find((pl) => inFrame({ x: pl.box.x0, y: pl.box.y0 }, 0) && inFrame({ x: pl.box.x1, y: pl.box.y1 }, 0)
+        && !(badge && overlap(badge, pl.box)));
     if (pl) { tags.push({ ...pl, kind: 'answer' }); taken.push(pl.box); }
   }
   if (hint || reveal) {
@@ -299,15 +330,17 @@ function RouteMap({ line, index, hint, reveal }: { line: Line; index: number; hi
       .filter((i) => i >= 0 && i < n);
     for (const i of near) {
       // 駅が混んでいて近くに置けないときは、少しずつ離して置き、線で駅と結ぶ
-      const pl = [0, 16, 32, 48].flatMap((gap) => POSITIONS.map((pos) => placeLabel(stationAt(line, i), pts[i], pos, W, gap))).find(fits);
+      const pl = [0, 16, 32, 48].flatMap((gap) => POSITIONS.map((pos) => placeLabel(onLine(i), pts[i], pos, W, gap))).find(fits);
       if (pl) { tags.push({ ...pl, kind: 'hint' }); taken.push(pl.box); }
     }
   }
 
-  // 名前を出す駅：両端 → 大きな駅（ほかの路線のものも、地図に入っていれば）。重なるものは出さない
-  const candidates: { st: Station; p: Pt }[] = [];
-  for (const i of line.loop ? [] : [0, n - 1]) candidates.push({ st: stationAt(line, i), p: pts[i] });
+  // 名前を出す駅：両端 → 大きな駅（出題の路線にあればそれ、無ければほかの路線のもの）。重なるものは出さない
+  const candidates: { st: MapStation; p: Pt }[] = [];
+  for (const i of line.loop ? [] : [0, n - 1]) candidates.push({ st: onLine(i), p: pts[i] });
   for (const hub of HUBS) {
+    const own = line.stations.findIndex((st) => st.startsWith(`${hub}|`));
+    if (own >= 0) { candidates.push({ st: onLine(own), p: pts[own] }); continue; }
     for (const l of LINES) {
       const i = l.stations.findIndex((st) => st.startsWith(`${hub}|`));
       if (i < 0) continue;
@@ -373,7 +406,7 @@ function RouteMap({ line, index, hint, reveal }: { line: Line; index: number; hi
             <circle cx={p.x} cy={p.y} r={4} fill={line.color} />
           </g>
         ))}
-        <MapTarget x={target.x} y={target.y} />
+        <MapTarget x={target.x} y={target.y} code={numbers ? answer.code : undefined} color={line.color} />
         {tags.map(({ st, anchor, x, y, box, kind }) => (
           <g key={st.name} style={{ animation: 'bounce-in 0.35s cubic-bezier(0.34,1.56,0.64,1) both', transformBox: 'fill-box', transformOrigin: 'center' }}>
             <rect
@@ -433,7 +466,7 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
     const lines = id === ALL_ID ? LINES : LINES.filter((l) => l.id === id);
     setLineId(id);
     // ろせんずのふつうは路線ぜんたいから選択肢を出す（となりの駅ばかりだと位置だけでは決めきれない）
-    const near = mode === 'number' || level === 'hard';
+    const near = mode !== 'map' || level === 'hard';
     setQuestions(buildQuestions(lines, QUESTION_COUNT, LEVELS[level].choices, near));
     setQIndex(0);
     setPicked(null);
@@ -503,19 +536,20 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
       {/* ── SELECT ── */}
       {phase === 'select' && (
         <div className="flex flex-col items-center gap-4 w-full max-w-sm px-4 animate-[fade-in_0.25s_ease_both]">
-          <div className="w-full grid grid-cols-2 gap-2 p-1 rounded-2xl bg-white shadow-inner" role="radiogroup" aria-label="あそびかた">
+          <div className="w-full grid grid-cols-3 gap-2 p-1 rounded-2xl bg-white shadow-inner" role="radiogroup" aria-label="あそびかた">
             {(Object.keys(MODES) as Mode[]).map((m) => (
               <button
                 key={m}
                 role="radio"
                 aria-checked={mode === m}
                 onClick={() => setMode(m)}
-                className="py-2 rounded-xl text-sm font-black transition-all active:scale-95"
+                className="py-1.5 rounded-xl text-sm font-black transition-all active:scale-95 flex flex-col items-center leading-tight"
                 style={mode === m
                   ? { background: THEME, color: 'white' }
                   : { background: 'transparent', color: '#868e96' }}
               >
-                {MODES[m].icon} {MODES[m].label}
+                <span>{MODES[m].icon}</span>
+                <span>{MODES[m].label}</span>
               </button>
             ))}
           </div>
@@ -575,16 +609,16 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
 
       {/* ── QUIZ ── */}
       {phase === 'quiz' && q && (
-        <div key={qIndex} className={`flex flex-col items-center gap-4 w-full ${mode === 'map' ? 'max-w-md' : 'max-w-sm'} px-4 animate-[fade-in_0.25s_ease_both]`}>
+        <div key={qIndex} className={`flex flex-col items-center gap-4 w-full ${mode !== 'number' ? 'max-w-md' : 'max-w-sm'} px-4 animate-[fade-in_0.25s_ease_both]`}>
           {/* Progress */}
           <div className="w-full flex items-center justify-between text-sm font-black text-gray-500">
-            <span>{qIndex + 1} / {questions.length} もんめ{mode === 'map' && ' 🗺️'}{level === 'hard' && ' 🔥'}</span>
+            <span>{qIndex + 1} / {questions.length} もんめ{mode !== 'number' && ` ${MODES[mode].icon}`}{level === 'hard' && ' 🔥'}</span>
             <span>⭕ {score}</span>
           </div>
 
           {/* Question */}
           <div
-            className={`w-full rounded-3xl bg-white ${mode === 'map' ? 'px-2' : 'px-4'} py-5 flex flex-col items-center gap-3 shadow-lg`}
+            className={`w-full rounded-3xl bg-white ${mode !== 'number' ? 'px-2' : 'px-4'} py-5 flex flex-col items-center gap-3 shadow-lg`}
             style={{ border: `4px solid ${q.line.color}` }}
           >
             <div className="flex items-center gap-2">
@@ -595,11 +629,13 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
               </ruby>
               <span className="text-xs font-bold text-gray-400">（{q.line.colorName}）</span>
             </div>
-            {mode === 'map' ? (
+            {mode !== 'number' ? (
               <>
                 <p className="-mt-1 text-[11px] font-bold text-gray-400">ゆびで うごかしたり、＋－で おおきく できるよ</p>
-                <RouteMap line={q.line} index={q.answer.number - 1} hint={showHint} reveal={answered} />
-                <p className="text-base font-black text-gray-600">？の えきは なにえき？</p>
+                <RouteMap line={q.line} index={q.answer.number - 1} hint={showHint} reveal={answered} numbers={mode === 'both'} />
+                <p className="text-base font-black text-gray-600">
+                  {mode === 'both' ? `${stationCode(q.line, q.answer.number)} は なにえき？` : '？の えきは なにえき？'}
+                </p>
               </>
             ) : (
               <>
@@ -616,14 +652,14 @@ export default function StationQuizScreen({ playerName, onHome }: Props) {
                 onClick={() => setShowHint(true)}
                 className="text-xs font-black text-gray-500 px-3 py-1.5 rounded-full bg-gray-100 active:scale-95 transition-all"
               >
-                💡 ヒント（となりの えき{mode === 'map' && 'を ちずに だす'}）
+                💡 ヒント（となりの えき{mode !== 'number' && 'を ちずに だす'}）
               </button>
             )}
             {(showHint || answered) && (
               <div className="w-full flex items-center justify-center gap-2 text-[11px] font-bold text-gray-500">
-                {q.prev && <span>◀ {mode === 'number' && stationCode(q.line, q.prev.number)} {q.prev.name}</span>}
+                {q.prev && <span>◀ {mode !== 'map' && stationCode(q.line, q.prev.number)} {q.prev.name}</span>}
                 <span className="text-gray-300">|</span>
-                {q.next && <span>{mode === 'number' && stationCode(q.line, q.next.number)} {q.next.name} ▶</span>}
+                {q.next && <span>{mode !== 'map' && stationCode(q.line, q.next.number)} {q.next.name} ▶</span>}
               </div>
             )}
           </div>
