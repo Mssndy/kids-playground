@@ -53,7 +53,7 @@ function emptyMarked(size = 5): boolean[][] {
   return Array.from({ length: size }, () => Array(size).fill(false));
 }
 
-/** いちばん大きいカード (50 球モード) の一辺。cellRefs はこの大きさで確保しておく。 */
+/** いちばん大きいカード (いちばん多い球数モード) の一辺。cellRefs はこの大きさで確保しておく。 */
 const MAX_GRID_SIZE = gridSizeForBalls(Math.max(...BALL_OPTIONS));
 
 // ── RingOverlay ───────────────────────────────────────────────────────────────
@@ -224,8 +224,8 @@ function Cell({
   number, marked, inLine, justLanded, isTarget, disabled, onClick, cellRef, compact,
 }: {
   number: number;
-  /** 7×7 以上のカード。マスが小さいので字とたまを一回り小さくする */
-  compact: boolean;
+  /** 'normal' = 6×6 まで / 'compact' = 7×7・8×8 / 'tiny' = 9×9 以上。マスが小さいほど字とたまを小さくする */
+  compact: 'normal' | 'compact' | 'tiny';
   marked: boolean;
   inLine: boolean;
   justLanded: boolean;
@@ -256,7 +256,7 @@ function Cell({
       className="relative flex items-center justify-center overflow-hidden select-none"
       style={{
         aspectRatio: '1',
-        border: `3px solid ${borderColor}`,
+        border: `${compact === 'tiny' ? 2 : 3}px solid ${borderColor}`,
         borderRadius: 5,
         background: bg,
         boxShadow: marked
@@ -274,15 +274,15 @@ function Cell({
 
       {marked ? (
         <>
-          <span className={`${compact ? 'text-base' : 'text-xl'} leading-none relative z-10`}
+          <span className={`${compact === 'tiny' ? 'text-xs' : compact === 'compact' ? 'text-base' : 'text-xl'} leading-none relative z-10`}
             style={{ filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.45))' }}>⚾</span>
           <span className="absolute bottom-0.5 right-1 leading-none relative z-10 font-black"
-            style={{ fontSize: 9, color: inLine ? '#78350F' : 'rgba(255,255,255,0.55)' }}>
+            style={{ fontSize: compact === 'tiny' ? 7 : 9, color: inLine ? '#78350F' : 'rgba(255,255,255,0.55)' }}>
             {number}
           </span>
         </>
       ) : (
-        <span className={`${compact ? 'text-sm' : 'text-base'} font-black relative z-10 leading-none`}
+        <span className={`${compact === 'tiny' ? 'text-xs' : compact === 'compact' ? 'text-sm' : 'text-base'} font-black relative z-10 leading-none`}
           style={{ color: isTarget ? '#1d4ed8' : '#78350F' }}>
           {number}
         </span>
@@ -464,7 +464,7 @@ export default function TossGameScreen({ playerName, onHome }: Props) {
           style={{ background: 'linear-gradient(160deg, #3B1A08, #6B2D0D)' }}
         >
           <p className="text-white font-black text-lg">⚾ たまの かず</p>
-          <div className="grid grid-cols-5 gap-2 w-full">
+          <div className="grid grid-cols-4 gap-2 w-full">
             {BALL_OPTIONS.map((n) => (
               <button
                 key={n}
@@ -550,7 +550,7 @@ export default function TossGameScreen({ playerName, onHome }: Props) {
             boxShadow: '0 8px 28px rgba(59,26,8,0.5)',
           }}
         >
-          <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${gridSize}, 1fr)` }}>
+          <div className={`grid ${gridSize >= 9 ? 'gap-1' : 'gap-1.5'}`} style={{ gridTemplateColumns: `repeat(${gridSize}, 1fr)` }}>
             {grid.map((row, r) =>
               row.map((num, c) => {
                 const key      = `${r},${c}`;
@@ -564,7 +564,7 @@ export default function TossGameScreen({ playerName, onHome }: Props) {
                     justLanded={justLanded === key}
                     isTarget={!!isTarget}
                     disabled={!!flyingBall || phase !== 'play'}
-                    compact={gridSize >= 7}
+                    compact={gridSize >= 9 ? 'tiny' : gridSize >= 7 ? 'compact' : 'normal'}
                     onClick={() => handleCellTap(r, c)}
                     cellRef={(el) => { cellRefs.current[r][c] = el; }}
                   />
@@ -625,7 +625,7 @@ export default function TossGameScreen({ playerName, onHome }: Props) {
             {Array.from({ length: totalBalls }).map((_, i) => (
               <span
                 key={i}
-                className={`${totalBalls > 20 ? 'text-base' : 'text-2xl'} leading-none transition-opacity duration-300`}
+                className={`${totalBalls > 50 ? 'text-xs' : totalBalls > 20 ? 'text-base' : 'text-2xl'} leading-none transition-opacity duration-300`}
                 style={{ opacity: i < ballsLeft ? 1 : 0.15 }}
               >
                 ⚾

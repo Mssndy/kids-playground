@@ -1,13 +1,15 @@
 export const TOSS_BALLS = 10;
 /** 20 球までは 5×5、それより多いモードはマスを広げる (たまは空いたマスにしか落ちないので、25 マスに 25 球以上だと全部うまってしまう)。 */
-export const BALL_OPTIONS = [8, 10, 12, 15, 20, 25, 30, 40, 50] as const;
+export const BALL_OPTIONS = [8, 10, 12, 15, 20, 25, 30, 40, 50, 60, 70, 80] as const;
 
 /** たまの数に合うビンゴカードの一辺。マス数がたまの数より多くなるようにする。 */
 export function gridSizeForBalls(balls: number): number {
   if (balls <= 20) return 5; // 25 マス
   if (balls <= 30) return 6; // 36 マス
   if (balls <= 40) return 7; // 49 マス
-  return 8;                  // 64 マス
+  if (balls <= 50) return 8; // 64 マス
+  if (balls <= 70) return 9; // 81 マス
+  return 10;                 // 100 マス (スマホでタップできる大きさの上限)
 }
 
 function shuffle<T>(arr: T[]): T[] {
