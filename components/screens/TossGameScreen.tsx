@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   generateTossGrid, checkTossLines, calcTossScore, getTossLineSegments,
-  TOSS_BALLS, BALL_OPTIONS, GaugeZone, getZoneFromRadius, calcLandingCell,
+  TOSS_BALLS, BALL_OPTIONS, gridSizeForBalls, GaugeZone, getZoneFromRadius, calcLandingCell,
 } from '@/lib/toss';
 import { playToss, playLand, playBingo, playCorrect, playWrong, playGaugeStop } from '@/lib/sounds';
 import { saveRankEntry } from '@/lib/ranking';
@@ -49,9 +49,12 @@ function zoneColorSolid(zone: GaugeZone) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function emptyMarked(): boolean[][] {
-  return Array.from({ length: 5 }, () => Array(5).fill(false));
+function emptyMarked(size = 5): boolean[][] {
+  return Array.from({ length: size }, () => Array(size).fill(false));
 }
+
+/** いちばん大きいカード (50 球モード) の一辺。cellRefs はこの大きさで確保しておく。 */
+const MAX_GRID_SIZE = gridSizeForBalls(Math.max(...BALL_OPTIONS));
 
 // ── RingOverlay ───────────────────────────────────────────────────────────────
 // Full-screen fixed SVG overlay. The ring pulsates from a dot to maxRadius around
@@ -218,9 +221,11 @@ function RingOverlay({
 // ── Cell ──────────────────────────────────────────────────────────────────────
 
 function Cell({
-  number, marked, inLine, justLanded, isTarget, disabled, onClick, cellRef,
+  number, marked, inLine, justLanded, isTarget, disabled, onClick, cellRef, compact,
 }: {
   number: number;
+  /** 7×7 以上のカード。マスが小さいので字とたまを一回り小さくする */
+  compact: boolean;
   marked: boolean;
   inLine: boolean;
   justLanded: boolean;
@@ -269,7 +274,7 @@ function Cell({
 
       {marked ? (
         <>
-          <span className="text-xl leading-none relative z-10"
+          <span className={`${compact ? 'text-base' : 'text-xl'} leading-none relative z-10`}
             style={{ filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.45))' }}>⚾</span>
           <span className="absolute bottom-0.5 right-1 leading-none relative z-10 font-black"
             style={{ fontSize: 9, color: inLine ? '#78350F' : 'rgba(255,255,255,0.55)' }}>
@@ -277,7 +282,7 @@ function Cell({
           </span>
         </>
       ) : (
-        <span className="text-base font-black relative z-10 leading-none"
+        <span className={`${compact ? 'text-sm' : 'text-base'} font-black relative z-10 leading-none`}
           style={{ color: isTarget ? '#1d4ed8' : '#78350F' }}>
           {number}
         </span>
@@ -308,6 +313,7 @@ export default function TossGameScreen({ playerName, onHome }: Props) {
   // Position/size of the target cell for the ring overlay
   const [ringPos, setRingPos]     = useState<{ cx: number; cy: number; maxR: number } | null>(null);
   const [ringSpeed, setRingSpeed] = useState<RingSpeed>('normal');
+  const gridSize = grid.length;
 
   const markedRef    = useRef(marked);
   const ballsLeftRef = useRef(ballsLeft);
@@ -322,7 +328,7 @@ export default function TossGameScreen({ playerName, onHome }: Props) {
   const ballIdRef      = useRef(0);
 
   const cellRefs    = useRef<(HTMLDivElement | null)[][]>(
-    Array.from({ length: 5 }, () => Array(5).fill(null)),
+    Array.from({ length: MAX_GRID_SIZE }, () => Array(MAX_GRID_SIZE).fill(null)),
   );
   const launcherRef = useRef<HTMLDivElement>(null);
   const cardRef     = useRef<HTMLDivElement>(null);
@@ -412,8 +418,8 @@ export default function TossGameScreen({ playerName, onHome }: Props) {
   // ── Reset ─────────────────────────────────────────────────────────────────────
 
   function handleReset() {
-    setGrid(generateTossGrid());
-    setMarked(emptyMarked());
+    setGrid(generateTossGrid(gridSize));
+    setMarked(emptyMarked(gridSize));
     setFlyingBall(null);
     setJustLanded(null);
     setLineCells(new Set());
@@ -425,10 +431,11 @@ export default function TossGameScreen({ playerName, onHome }: Props) {
   }
 
   function handleStart(balls: number) {
+    const size = gridSizeForBalls(balls);
     setTotalBalls(balls);
     setBallsLeft(balls);
-    setGrid(generateTossGrid());
-    setMarked(emptyMarked());
+    setGrid(generateTossGrid(size));
+    setMarked(emptyMarked(size));
     setLineCells(new Set());
     setLineCount(0);
     setScore(0);
@@ -473,6 +480,11 @@ export default function TossGameScreen({ playerName, onHome }: Props) {
                 }}
               >
                 {n}
+                {gridSizeForBalls(n) > 5 && (
+                  <span className="text-[10px] font-bold leading-none opacity-75">
+                    {gridSizeForBalls(n)}×{gridSizeForBalls(n)}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -538,7 +550,7 @@ export default function TossGameScreen({ playerName, onHome }: Props) {
             boxShadow: '0 8px 28px rgba(59,26,8,0.5)',
           }}
         >
-          <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
+          <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${gridSize}, 1fr)` }}>
             {grid.map((row, r) =>
               row.map((num, c) => {
                 const key      = `${r},${c}`;
@@ -552,6 +564,7 @@ export default function TossGameScreen({ playerName, onHome }: Props) {
                     justLanded={justLanded === key}
                     isTarget={!!isTarget}
                     disabled={!!flyingBall || phase !== 'play'}
+                    compact={gridSize >= 7}
                     onClick={() => handleCellTap(r, c)}
                     cellRef={(el) => { cellRefs.current[r][c] = el; }}
                   />
@@ -574,13 +587,13 @@ export default function TossGameScreen({ playerName, onHome }: Props) {
               {getTossLineSegments(marked).map(({ r1, c1, r2, c2 }, i) => (
                 <g key={i}>
                   <line
-                    x1={c1 * 20 + 10} y1={r1 * 20 + 10}
-                    x2={c2 * 20 + 10} y2={r2 * 20 + 10}
+                    x1={c1 * (100 / gridSize) + 50 / gridSize} y1={r1 * (100 / gridSize) + 50 / gridSize}
+                    x2={c2 * (100 / gridSize) + 50 / gridSize} y2={r2 * (100 / gridSize) + 50 / gridSize}
                     stroke="rgba(251,191,36,0.45)" strokeWidth={14} strokeLinecap="round"
                   />
                   <line
-                    x1={c1 * 20 + 10} y1={r1 * 20 + 10}
-                    x2={c2 * 20 + 10} y2={r2 * 20 + 10}
+                    x1={c1 * (100 / gridSize) + 50 / gridSize} y1={r1 * (100 / gridSize) + 50 / gridSize}
+                    x2={c2 * (100 / gridSize) + 50 / gridSize} y2={r2 * (100 / gridSize) + 50 / gridSize}
                     stroke="rgba(255,255,255,0.92)" strokeWidth={5} strokeLinecap="round"
                   />
                 </g>
@@ -612,7 +625,7 @@ export default function TossGameScreen({ playerName, onHome }: Props) {
             {Array.from({ length: totalBalls }).map((_, i) => (
               <span
                 key={i}
-                className="text-2xl leading-none transition-opacity duration-300"
+                className={`${totalBalls > 20 ? 'text-base' : 'text-2xl'} leading-none transition-opacity duration-300`}
                 style={{ opacity: i < ballsLeft ? 1 : 0.15 }}
               >
                 ⚾
