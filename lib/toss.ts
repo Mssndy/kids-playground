@@ -1,5 +1,16 @@
 export const TOSS_BALLS = 10;
-export const BALL_OPTIONS = [8, 10, 12, 15, 20] as const;
+/** 20 球までは 5×5、それより多いモードはマスを広げる (たまは空いたマスにしか落ちないので、25 マスに 25 球以上だと全部うまってしまう)。 */
+export const BALL_OPTIONS = [8, 10, 12, 15, 20, 25, 30, 40, 50, 60, 70, 80] as const;
+
+/** たまの数に合うビンゴカードの一辺。マス数がたまの数より多くなるようにする。 */
+export function gridSizeForBalls(balls: number): number {
+  if (balls <= 20) return 5; // 25 マス
+  if (balls <= 30) return 6; // 36 マス
+  if (balls <= 40) return 7; // 49 マス
+  if (balls <= 50) return 8; // 64 マス
+  if (balls <= 70) return 9; // 81 マス
+  return 10;                 // 100 マス (スマホでタップできる大きさの上限)
+}
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -10,24 +21,26 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-/** Returns a 5×5 grid of numbers 1–25 in random order. */
-export function generateTossGrid(): number[][] {
-  const nums = shuffle(Array.from({ length: 25 }, (_, i) => i + 1));
-  return Array.from({ length: 5 }, (_, r) => nums.slice(r * 5, r * 5 + 5));
+/** Returns a size×size grid of numbers 1–size² in random order. */
+export function generateTossGrid(size = 5): number[][] {
+  const nums = shuffle(Array.from({ length: size * size }, (_, i) => i + 1));
+  return Array.from({ length: size }, (_, r) => nums.slice(r * size, r * size + size));
 }
 
 import type { LineSegment } from '@/lib/types';
 
 export function getTossLineSegments(marked: boolean[][]): LineSegment[] {
+  const n = marked.length;
+  const last = n - 1;
   const segs: LineSegment[] = [];
-  for (let r = 0; r < 5; r++) {
-    if (marked[r].every(Boolean)) segs.push({ r1: r, c1: 0, r2: r, c2: 4 });
+  for (let r = 0; r < n; r++) {
+    if (marked[r].every(Boolean)) segs.push({ r1: r, c1: 0, r2: r, c2: last });
   }
-  for (let c = 0; c < 5; c++) {
-    if (marked.every((row) => row[c])) segs.push({ r1: 0, c1: c, r2: 4, c2: c });
+  for (let c = 0; c < n; c++) {
+    if (marked.every((row) => row[c])) segs.push({ r1: 0, c1: c, r2: last, c2: c });
   }
-  if (marked.every((row, i) => row[i])) segs.push({ r1: 0, c1: 0, r2: 4, c2: 4 });
-  if (marked.every((row, i) => row[4 - i])) segs.push({ r1: 0, c1: 4, r2: 4, c2: 0 });
+  if (marked.every((row, i) => row[i])) segs.push({ r1: 0, c1: 0, r2: last, c2: last });
+  if (marked.every((row, i) => row[last - i])) segs.push({ r1: 0, c1: last, r2: last, c2: 0 });
   return segs;
 }
 
@@ -39,28 +52,29 @@ export interface TossLineResult {
 }
 
 export function checkTossLines(marked: boolean[][]): TossLineResult {
+  const n = marked.length;
   const cells = new Set<string>();
   let count = 0;
 
-  for (let r = 0; r < 5; r++) {
+  for (let r = 0; r < n; r++) {
     if (marked[r].every(Boolean)) {
       count++;
-      for (let c = 0; c < 5; c++) cells.add(`${r},${c}`);
+      for (let c = 0; c < n; c++) cells.add(`${r},${c}`);
     }
   }
-  for (let c = 0; c < 5; c++) {
+  for (let c = 0; c < n; c++) {
     if (marked.every(row => row[c])) {
       count++;
-      for (let r = 0; r < 5; r++) cells.add(`${r},${c}`);
+      for (let r = 0; r < n; r++) cells.add(`${r},${c}`);
     }
   }
   if (marked.every((row, i) => row[i])) {
     count++;
-    for (let i = 0; i < 5; i++) cells.add(`${i},${i}`);
+    for (let i = 0; i < n; i++) cells.add(`${i},${i}`);
   }
-  if (marked.every((row, i) => row[4 - i])) {
+  if (marked.every((row, i) => row[n - 1 - i])) {
     count++;
-    for (let i = 0; i < 5; i++) cells.add(`${i},${4 - i}`);
+    for (let i = 0; i < n; i++) cells.add(`${i},${n - 1 - i}`);
   }
 
   return { cells, count };
@@ -109,8 +123,8 @@ export function calcLandingCell(
   marked: boolean[][],
 ): [number, number] {
   const unmarked: [number, number][] = [];
-  for (let r = 0; r < 5; r++)
-    for (let c = 0; c < 5; c++)
+  for (let r = 0; r < marked.length; r++)
+    for (let c = 0; c < marked[r].length; c++)
       if (!marked[r][c]) unmarked.push([r, c]);
 
   if (unmarked.length === 0) return [targetRow, targetCol];
